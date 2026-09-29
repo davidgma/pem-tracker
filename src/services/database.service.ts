@@ -4,6 +4,7 @@
  */
 
 import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { get, set } from 'idb-keyval';
 import { AsyncMutex } from './mutex';
 import { ActivityRecord, PEMRecord, QueryExecutionResult } from '../types/database.types';
@@ -40,22 +41,39 @@ export class DatabaseService {
     return this.mutex.lock(async () => {
       if (this.isInitialized) return;
 
-      try {
-        this.SQL = await initSqlJs({
-          locateFile: (file) => `/${file}`,
-        });
-      } catch (localErr) {
-        console.warn('Local wasm load failed, trying sql.js.org CDN:', localErr);
+      let wasmBinary: ArrayBuffer | null = null;
+      const sources = [
+        sqlWasmUrl,
+        '/sql-wasm.wasm',
+        'https://sql.js.org/dist/sql-wasm.wasm',
+        'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm',
+      ];
+
+      for (const url of sources) {
         try {
-          this.SQL = await initSqlJs({
-            locateFile: () => 'https://sql.js.org/dist/sql-wasm.wasm',
-          });
-        } catch (cdnErr) {
-          console.warn('Trying cdnjs fallback:', cdnErr);
-          this.SQL = await initSqlJs({
-            locateFile: () => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm',
-          });
+          const resp = await fetch(url);
+          if (!resp.ok) continue;
+          const buf = await resp.arrayBuffer();
+          const bytes = new Uint8Array(buf.slice(0, 4));
+          // Validate WebAssembly magic header: 0x00 0x61 0x73 0x6d (\0asm)
+          if (bytes[0] === 0x00 && bytes[1] === 0x61 && bytes[2] === 0x73 && bytes[3] === 0x6d) {
+            wasmBinary = buf;
+            break;
+          } else {
+            console.warn(`Source ${url} returned non-WASM content (e.g. HTML 404), checking next source...`);
+          }
+        } catch (fetchErr) {
+          console.warn(`Failed to fetch wasm binary from ${url}:`, fetchErr);
         }
+      }
+
+      if (wasmBinary) {
+        this.SQL = await initSqlJs({ wasmBinary });
+      } else {
+        // Fallback to standard initSqlJs locator if direct binary fetch was blocked by CORS
+        this.SQL = await initSqlJs({
+          locateFile: () => sqlWasmUrl || 'https://sql.js.org/dist/sql-wasm.wasm',
+        });
       }
 
       // Check IndexedDB local cache first for fast offline startup
