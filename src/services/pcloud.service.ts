@@ -163,7 +163,7 @@ export class PCloudService {
     const authHost = region === 'eu' ? 'https://eumy.pcloud.com' : 'https://my.pcloud.com';
     const redirect = this.config.redirectUri;
 
-    const authUrl = `${authHost}/oauth/authorize?client_id=${encodeURIComponent(
+    const authUrl = `${authHost}/oauth2/authorize?client_id=${encodeURIComponent(
       this.config.clientId
     )}&response_type=token&redirect_uri=${encodeURIComponent(redirect)}`;
 
