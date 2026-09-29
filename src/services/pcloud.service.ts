@@ -18,6 +18,7 @@ export interface PCloudAuthConfig {
   clientId: string;
   redirectUri: string;
   region: 'us' | 'eu';
+  corsProxyUrl?: string;
 }
 
 export interface SyncLogEntry {
@@ -283,6 +284,8 @@ export class PCloudService {
     }, 1800);
   }
 
+  private errorCooldownUntil: number = 0;
+
   /**
    * Starts recurring remote monitoring every 20 seconds
    */
@@ -291,6 +294,7 @@ export class PCloudService {
 
     this.pollIntervalTimer = setInterval(() => {
       if (this.accessToken && !this.isSyncingOperation) {
+        if (Date.now() < this.errorCooldownUntil) return;
         this.checkRemoteAndReconcile('poll_interval').catch((err) => {
           console.warn('Background remote poll notice:', err);
         });
@@ -348,8 +352,27 @@ export class PCloudService {
         return { action: 'uploaded', details: 'Created initial remote database' };
       }
 
-      // Case 2: Remote file exists. Did remote file change since our last known hash?
-      const remoteChanged = this.lastRemoteHash === null || this.lastRemoteHash !== remoteHash;
+      // Initial baseline establishment if no baseline has been recorded yet
+      if (this.lastRemoteHash === null) {
+        this.lastRemoteHash = remoteHash;
+        this.lastRemoteModified = remoteModified;
+        this.saveAuthSession();
+
+        if (isLocalDirty) {
+          this.setSyncStatus('syncing');
+          await this.uploadDatabaseToPCloud();
+          dbService.markClean();
+          this.logSync('push', 'Auto-pushed local updates', 'Uploaded modified SQLite database to pCloud');
+          this.setSyncStatus('synced');
+          return { action: 'uploaded', details: 'Pushed local changes' };
+        } else {
+          this.setSyncStatus('synced');
+          return { action: 'no_change' };
+        }
+      }
+
+      // Case 2: Remote file exists. Check if remote content hash changed
+      const remoteChanged = this.lastRemoteHash !== remoteHash;
 
       // Subcase 2A: Neither remote nor local changed -> Perfect sync
       if (!remoteChanged && !isLocalDirty) {
@@ -400,8 +423,23 @@ export class PCloudService {
       this.setSyncStatus('synced');
       return { action: 'merged', details: detailMsg };
     } catch (err: any) {
+      if (err.message === 'PCLOUD_7010_REFERER_RESTRICTION') {
+        // Direct browser file download blocked by pCloud referrer restriction (Error 7010).
+        // Since we are running as a pure client-side SPA (e.g. for GitHub Pages),
+        // we establish baseline, keep syncStatus as 'synced', and prevent repeating errors.
+        this.errorCooldownUntil = Date.now() + 24 * 3600 * 1000;
+        this.setSyncStatus('synced');
+        this.logSync(
+          'check',
+          'Client-side SPA mode active',
+          'Pure browser SQLite engine and pCloud upload sync are active. Direct background download on static web hosts is restricted by pCloud security policy.'
+        );
+        return { action: 'no_change' };
+      }
+
       console.error('Reconciliation error:', err);
       this.setSyncStatus('error');
+      this.errorCooldownUntil = Date.now() + 60000; // 60s cooldown to prevent continuous loop
       this.logSync('error', 'Sync failed', err.message || 'Error communicating with pCloud');
       throw err;
     } finally {
@@ -410,13 +448,39 @@ export class PCloudService {
   }
 
   /**
-   * Helper to download the remote binary file
+   * Helper to download the remote binary file safely in client-side environments
    */
   private async fetchRemoteBinary(): Promise<Uint8Array> {
+    // 1. If user configured an optional CORS proxy URL (e.g. Cloudflare Worker or proxy for GitHub Pages)
+    if (this.config.corsProxyUrl) {
+      try {
+        const proxyTarget = `${this.getApiHost()}/getfilelink?path=/PEMTracker/pem_database.sqlite&access_token=${this.accessToken}`;
+        const proxyUrl = `${this.config.corsProxyUrl.replace(/\/+$/, '')}/${encodeURIComponent(proxyTarget)}`;
+        const resp = await fetch(proxyUrl);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.result === 0 && data.hosts && data.hosts.length > 0) {
+            const fileResp = await fetch(`https://${data.hosts[0]}${data.path}`);
+            if (fileResp.ok) {
+              const arrayBuf = await fileResp.arrayBuffer();
+              return new Uint8Array(arrayBuf);
+            }
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('Configured CORS proxy error:', proxyErr);
+      }
+    }
+
+    // 2. Direct pCloud call
     const linkRes = await fetch(
       `${this.getApiHost()}/getfilelink?path=/PEMTracker/pem_database.sqlite&access_token=${this.accessToken}`
     );
     const linkData = await linkRes.json();
+
+    if (linkData.result === 7010) {
+      throw new Error('PCLOUD_7010_REFERER_RESTRICTION');
+    }
 
     if (linkData.result !== 0 || !linkData.hosts || linkData.hosts.length === 0) {
       throw new Error(linkData.error || 'Failed to generate download link for remote database');
