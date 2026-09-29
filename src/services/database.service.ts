@@ -394,6 +394,73 @@ export class DatabaseService {
   }
 
   /**
+   * Export the entire database as a standard SQLite SQL dump text script (.dump)
+   */
+  public async exportSqlDump(): Promise<string> {
+    await this.initialize();
+    return this.mutex.lock(async () => {
+      if (!this.db) throw new Error('Database not initialized');
+      const lines: string[] = [
+        '-- PEM Tracker SQLite Database Dump',
+        `-- Generated at: ${new Date().toISOString()}`,
+        'PRAGMA foreign_keys=OFF;',
+        'BEGIN TRANSACTION;',
+        '',
+      ];
+
+      // Export schema and data for tables
+      const tables = ['t_pems', 't_activities', 't_tombstones'];
+      for (const table of tables) {
+        // Table schema
+        const schemaRes = this.db.exec(
+          `SELECT sql FROM sqlite_master WHERE type='table' AND name='${table}'`
+        );
+        if (schemaRes.length > 0 && schemaRes[0].values.length > 0) {
+          lines.push(`${schemaRes[0].values[0][0]};`);
+        }
+
+        // Table rows
+        const rowsRes = this.db.exec(`SELECT * FROM ${table}`);
+        if (rowsRes.length > 0 && rowsRes[0].values.length > 0) {
+          const cols = rowsRes[0].columns.join(', ');
+          for (const row of rowsRes[0].values) {
+            const vals = row
+              .map((v) => {
+                if (v === null || v === undefined) return 'NULL';
+                if (typeof v === 'number') return v;
+                return `'${String(v).replace(/'/g, "''")}'`;
+              })
+              .join(', ');
+            lines.push(`INSERT OR REPLACE INTO ${table} (${cols}) VALUES (${vals});`);
+          }
+        }
+        lines.push('');
+      }
+
+      lines.push('COMMIT;');
+      return lines.join('\n');
+    });
+  }
+
+  /**
+   * Imports and executes a SQL script (.sql dump)
+   */
+  public async importSqlDump(sqlScript: string): Promise<void> {
+    await this.initialize();
+    return this.mutex.lock(async () => {
+      if (!this.SQL) throw new Error('SQL engine not ready');
+      if (!this.db) {
+        this.db = new this.SQL.Database();
+      }
+      this.db.run(sqlScript);
+      await this.ensureSchema();
+      this.isLocalDirty = false;
+      await this.persistToLocalCache();
+      this.notifyChange();
+    });
+  }
+
+  /**
    * Replace the active SQLite database with remote pCloud or imported binary data
    */
   public async loadDatabaseBinary(binaryData: Uint8Array): Promise<void> {

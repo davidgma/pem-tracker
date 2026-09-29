@@ -28,6 +28,7 @@ import {
   Link2,
   Eye,
   EyeOff,
+  FileCode,
 } from 'lucide-react';
 import { PCloudUser, SyncLogEntry } from '../../services/pcloud.service';
 
@@ -173,6 +174,45 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const handleExportSqlDump = async () => {
+    try {
+      const sqlText = await context.database.exportSqlDump();
+      const blob = new Blob([sqlText], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pem_data_${new Date().toISOString().substring(0, 10)}.sql`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      context.showNotification('Exported SQL Dump', 'Downloaded pem_data.sql text file', 'success');
+    } catch (err: any) {
+      context.showNotification('Export Error', err.message || 'Failed to export SQL dump', 'error');
+    }
+  };
+
+  const handleImportSqlDump = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const text = reader.result as string;
+        await context.database.importSqlDump(text);
+        context.showNotification(
+          'SQL Dump Restored',
+          `Executed ${file.name} successfully into SQLite engine`,
+          'success'
+        );
+        refreshDbSize();
+      } catch (err: any) {
+        context.showNotification('Import Failed', err.message || 'Invalid SQL script', 'error');
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleLogout = () => {
@@ -463,8 +503,23 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
         </div>
 
         <p className="text-xs text-slate-600 leading-relaxed">
-          Paste your pCloud share link (e.g. <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-slate-700">https://u.pcloud.link/publink/show?code=...</code>) or direct database URL below. It will be stored securely in your browser&apos;s persistent local storage (never committed to git or exposed to third parties) and used to pull your latest SQLite database every time you open or refresh the app.
+          Paste your direct database download URL below (supports both <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-slate-700">pem_database.sqlite</code> binary and <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-slate-700">pem_data.sql</code> text dump). Stored locally in your browser&apos;s persistent storage.
         </p>
+
+        <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg text-xs text-amber-900 space-y-1.5">
+          <p className="font-semibold flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>How to get the direct download link from pCloud:</span>
+          </p>
+          <ul className="text-[11px] leading-relaxed text-amber-800 list-disc list-inside space-y-1">
+            <li>
+              <strong>Direct Link from Share Page:</strong> Open your shared link in a browser, <strong>right-click the blue &ldquo;Download&rdquo; button</strong> on pCloud&apos;s page, choose <strong>&ldquo;Copy link address&rdquo;</strong>, and paste it below.
+            </li>
+            <li>
+              <strong>Or Public Folder Link:</strong> If you place <code className="font-mono">pem_data.sql</code> or <code className="font-mono">pem_database.sqlite</code> in pCloud&apos;s Public Folder, copy its direct <code className="font-mono">filedn.com</code> link.
+            </li>
+          </ul>
+        </div>
 
         <div className="space-y-3">
           <div className="relative">
@@ -568,16 +623,35 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium border border-slate-200 transition-colors shadow-sm min-h-[40px]"
           >
             <Download className="w-3.5 h-3.5 text-teal-600" />
-            <span>Export Database (.sqlite)</span>
+            <span>Export SQLite (.sqlite)</span>
           </button>
 
           <label className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium border border-slate-200 transition-colors shadow-sm cursor-pointer min-h-[40px]">
-            <Upload className="w-3.5 h-3.5 text-sky-600" />
+            <Upload className="w-3.5 h-3.5 text-teal-600" />
             <span>Restore / Import (.sqlite)</span>
             <input
               type="file"
               accept=".sqlite,.db"
               onChange={handleImportLocalSqlite}
+              className="hidden"
+            />
+          </label>
+
+          <button
+            onClick={handleExportSqlDump}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium border border-slate-200 transition-colors shadow-sm min-h-[40px]"
+          >
+            <FileCode className="w-3.5 h-3.5 text-sky-600" />
+            <span>Export SQL Dump (.sql)</span>
+          </button>
+
+          <label className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-xs font-medium border border-slate-200 transition-colors shadow-sm cursor-pointer min-h-[40px]">
+            <Upload className="w-3.5 h-3.5 text-sky-600" />
+            <span>Restore / Import (.sql)</span>
+            <input
+              type="file"
+              accept=".sql,.txt"
+              onChange={handleImportSqlDump}
               className="hidden"
             />
           </label>

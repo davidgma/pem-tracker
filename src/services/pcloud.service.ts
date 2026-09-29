@@ -575,18 +575,34 @@ export class PCloudService {
         const arrayBuf = await resp.arrayBuffer();
         const bytes = new Uint8Array(arrayBuf);
 
-        // SQLite validation
-        if (bytes.length < 16) {
+        // Validation: verify if binary SQLite or text SQL dump
+        if (bytes.length < 10) {
           throw new Error('Downloaded file is empty or too small.');
         }
 
         const headerStr = String.fromCharCode(...bytes.subarray(0, 15));
-        if (!headerStr.startsWith('SQLite format 3')) {
-          const sampleText = new TextDecoder().decode(bytes.subarray(0, 120));
-          if (sampleText.toLowerCase().includes('<html') || sampleText.toLowerCase().includes('<!doctype')) {
-            throw new Error('The provided URL returned a web page (HTML) rather than the SQLite database file.');
-          }
-          throw new Error('The downloaded file is not a valid SQLite3 database.');
+        const sampleText = new TextDecoder().decode(bytes.subarray(0, 300)).trim();
+
+        if (
+          sampleText.toLowerCase().includes('<html') ||
+          sampleText.toLowerCase().includes('<!doctype')
+        ) {
+          throw new Error(
+            'The URL returned pCloud\'s web preview page (HTML) instead of the file. To get the direct download link: open your shared link in a browser, right-click the "Download" button, and click "Copy Link Address", or place the file in your pCloud Public Folder.'
+          );
+        }
+
+        const isSqlDump =
+          sampleText.includes('CREATE TABLE') ||
+          sampleText.includes('INSERT INTO') ||
+          sampleText.includes('BEGIN TRANSACTION') ||
+          sampleText.includes('PRAGMA') ||
+          sampleText.startsWith('--');
+
+        if (!headerStr.startsWith('SQLite format 3') && !isSqlDump) {
+          throw new Error(
+            'The downloaded file is neither a valid SQLite3 binary database nor a valid SQL script (.sql dump).'
+          );
         }
 
         return bytes;
@@ -599,7 +615,8 @@ export class PCloudService {
   }
 
   /**
-   * Fetches database from shared link and loads it into the local SQLite engine
+   * Fetches database from shared link (either .sqlite binary or .sql text dump)
+   * and loads it into the local SQLite engine
    */
   public async loadFromSharedLink(
     overrideUrl?: string
@@ -612,10 +629,28 @@ export class PCloudService {
     this.setSyncStatus('syncing');
     try {
       const bytes = await this.fetchSharedLinkBinary(urlToUse);
-      await dbService.loadDatabaseBinary(bytes);
+      const headerStr = String.fromCharCode(...bytes.subarray(0, 15));
+
+      if (headerStr.startsWith('SQLite format 3')) {
+        await dbService.loadDatabaseBinary(bytes);
+        this.logSync(
+          'pull',
+          'Loaded SQLite from Shared Link',
+          `Restored ${(bytes.byteLength / 1024).toFixed(1)} KB binary database from pCloud share URL`
+        );
+      } else {
+        // It's a text SQL dump!
+        const sqlText = new TextDecoder().decode(bytes);
+        await dbService.importSqlDump(sqlText);
+        this.logSync(
+          'pull',
+          'Executed SQL Dump from Shared Link',
+          `Restored ${(bytes.byteLength / 1024).toFixed(1)} KB SQL script dump into SQLite engine`
+        );
+      }
+
       this.lastSyncedTime = new Date();
       this.setSyncStatus('synced');
-      this.logSync('pull', 'Loaded from Shared Link', `Restored ${bytes.byteLength} bytes from pCloud share URL`);
       return {
         success: true,
         size: bytes.byteLength,
@@ -653,16 +688,23 @@ export class PCloudService {
   }
 
   /**
-   * Upload SQLite binary directly to pCloud /PEMTracker/pem_database.sqlite
+   * Upload SQLite binary AND SQL text dump to pCloud /PEMTracker/
    */
   public async uploadDatabaseToPCloud(): Promise<void> {
     if (!this.accessToken) throw new Error('Not authenticated with pCloud');
 
     const binaryData = await dbService.exportDatabase();
-    const blob = new Blob([binaryData.buffer as ArrayBuffer], { type: 'application/x-sqlite3' });
+    const sqlDumpText = await dbService.exportSqlDump();
 
+    const blobSqlite = new Blob([binaryData.buffer as ArrayBuffer], {
+      type: 'application/x-sqlite3',
+    });
+    const blobSqlText = new Blob([sqlDumpText], { type: 'text/plain;charset=utf-8' });
+
+    // Upload pem_database.sqlite
     const formData = new FormData();
-    formData.append('file', blob, 'pem_database.sqlite');
+    formData.append('file', blobSqlite, 'pem_database.sqlite');
+    formData.append('file2', blobSqlText, 'pem_data.sql');
 
     const url = `${this.getApiHost()}/uploadfile?path=/PEMTracker&filename=pem_database.sqlite&access_token=${this.accessToken}&nopartial=1`;
     const response = await fetch(url, {
