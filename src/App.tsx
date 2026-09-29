@@ -55,18 +55,18 @@ export default function App() {
   useEffect(() => {
     async function boot() {
       try {
-        // 1. Initialize SQLite WASM storage & local cache
-        await dbService.initialize();
-
-        // 2. Discover and initialize all plugins in directory
+        // 1. Discover and initialize all plugins FIRST so navigation and views are registered immediately
         await pluginRegistry.loadAllPlugins();
 
         setNavItems(pluginRegistry.getNavItems());
         setMenuItems(pluginRegistry.getMenuItems());
         setActiveViewId(pluginRegistry.getActiveViewId());
         setNotifications(pluginRegistry.getNotifications());
+
+        // 2. Initialize SQLite WASM storage & local cache
+        await dbService.initialize();
       } catch (err) {
-        console.error('Fatal boot error:', err);
+        console.error('Initialization error:', err);
       } finally {
         setIsInitializing(false);
       }
@@ -119,9 +119,13 @@ export default function App() {
     }
   };
 
-  // Find active view component
+  // Find active view component with automatic fallback to dashboard
   const currentView = useMemo(() => {
-    return pluginRegistry.getView(activeViewId);
+    const view = pluginRegistry.getView(activeViewId);
+    if (!view) {
+      return pluginRegistry.getView('dashboard') || Array.from(pluginRegistry.getViews().values())[0];
+    }
+    return view;
   }, [activeViewId, navItems]);
 
   const dashboardWidgets = useMemo(() => {
@@ -134,7 +138,7 @@ export default function App() {
 
   if (isInitializing) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300 space-y-4">
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300 space-y-4 px-4">
         <div className="relative">
           <div className="h-12 w-12 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 animate-pulse">
             <HeartPulse className="w-6 h-6" />
@@ -143,7 +147,7 @@ export default function App() {
         <div className="text-center space-y-1">
           <p className="text-sm font-semibold text-white">Initializing PEM Tracker</p>
           <p className="text-xs text-slate-500">
-            Mounting SQLite3 WASM engine &amp; loading plugins...
+            Loading plugins &amp; preparing SQLite3 engine...
           </p>
         </div>
       </div>
@@ -151,24 +155,24 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-white">
       {/* Strict Top Bar Contract: Zone 1 (Wordmark) — Zone 2 (4-6 nav links) — Zone 3 (Primary actions) */}
-      <header className="sticky top-0 z-40 bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-4 lg:px-8">
-        <div className="max-w-7xl mx-auto h-16 flex items-center justify-between gap-4">
+      <header className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Zone 1: Single text element wordmark */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => handleNavClick('dashboard')}
-              className="text-lg font-bold tracking-tight text-white hover:text-teal-400 transition-colors whitespace-nowrap flex items-center gap-2 text-left"
+              className="text-base sm:text-lg font-bold tracking-tight text-white hover:text-teal-400 transition-colors whitespace-nowrap flex items-center gap-2 text-left min-h-[44px]"
             >
-              <div className="h-8 w-8 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-400">
+              <div className="h-8 w-8 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
                 <HeartPulse className="w-4 h-4" />
               </div>
-              <span>PEM Tracker</span>
+              <span className="tracking-tight">PEM Tracker</span>
             </button>
           </div>
 
-          {/* Zone 2: Clean 4–6 text navigation links */}
+          {/* Zone 2: Clean 4–6 text navigation links (Desktop) */}
           <nav className="hidden md:flex items-center gap-1 text-xs font-medium">
             {navItems.map((item) => {
               const isActive = activeViewId === item.viewId;
@@ -176,7 +180,7 @@ export default function App() {
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.viewId)}
-                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-colors whitespace-nowrap ${
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap min-h-[40px] ${
                     isActive
                       ? 'bg-teal-500/10 text-teal-400 font-semibold border border-teal-500/30 shadow-sm'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
@@ -195,22 +199,22 @@ export default function App() {
           </nav>
 
           {/* Zone 3: 1–2 primary actions + menu */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {/* pCloud Sync quick status button */}
             <button
               onClick={handleManualSync}
               title={
                 pcloudService.isAuthenticated()
                   ? `pCloud: ${syncStatus.toUpperCase()} (Click to sync)`
-                  : 'pCloud: Offline / Local Cache (Click to connect)'
+                  : 'pCloud: Local Mode (Click to connect)'
               }
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] ${
                 pcloudService.isAuthenticated()
                   ? 'bg-slate-900 border-teal-500/30 text-teal-300 hover:bg-slate-800'
                   : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
               }`}
             >
-              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin text-teal-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-teal-400' : ''}`} />
               <span className="hidden sm:inline">
                 {pcloudService.isAuthenticated() ? 'pCloud Synced' : 'Local SQLite'}
               </span>
@@ -220,10 +224,10 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium transition-colors min-h-[40px]"
                 aria-label="Toggle Plugin Menu"
               >
-                <Menu className="w-3.5 h-3.5" />
+                <Menu className="w-4 h-4" />
                 <span className="hidden sm:inline">Menu</span>
                 <ChevronDown className="w-3 h-3 text-slate-500" />
               </button>
@@ -247,7 +251,7 @@ export default function App() {
                           item.action();
                           setIsMenuOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-slate-800 transition-colors min-h-[40px]"
                       >
                         {renderIcon(item.icon, 'w-3.5 h-3.5 text-teal-400')}
                         <span>{item.label}</span>
@@ -265,7 +269,7 @@ export default function App() {
                       <span className="text-teal-400 font-mono">Thread-Safe</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Website:</span>
+                      <span>Target Host:</span>
                       <span className="text-sky-300 font-mono">pem.freshfood.rocks</span>
                     </div>
                   </div>
@@ -276,29 +280,29 @@ export default function App() {
         </div>
       </header>
 
-      {/* Mobile Navigation Strip */}
-      <div className="md:hidden border-b border-slate-800/80 bg-slate-950 px-4 py-2 flex items-center gap-2 overflow-x-auto">
+      {/* Mobile Navigation Strip (Touch-optimized horizontal scroll) */}
+      <div className="md:hidden border-b border-slate-800/80 bg-slate-950 px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
         {navItems.map((item) => {
           const isActive = activeViewId === item.viewId;
           return (
             <button
               key={item.id}
               onClick={() => handleNavClick(item.viewId)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs whitespace-nowrap font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs whitespace-nowrap font-medium transition-colors min-h-[40px] shrink-0 ${
                 isActive
                   ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30'
                   : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800/60'
               }`}
             >
-              {renderIcon(item.icon, 'w-3 h-3')}
+              {renderIcon(item.icon, 'w-3.5 h-3.5')}
               <span>{item.label}</span>
             </button>
           );
         })}
       </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {/* Main Responsive Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
         {/* Render Plugin Dashboard Widgets if in Dashboard view */}
         {activeViewId === 'dashboard' && dashboardWidgets.length > 0 && (
           <div className="mb-6 space-y-3">
@@ -314,13 +318,13 @@ export default function App() {
           React.createElement(currentView.component, { context: pluginContext })
         ) : (
           <div className="text-center py-16 text-slate-500 text-xs">
-            View not found. Please select a valid option from the menu.
+            Loading view...
           </div>
         )}
       </main>
 
       {/* Global Notifications / Toast Center */}
-      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+      <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-50 flex flex-col gap-2 max-w-sm w-auto pointer-events-none">
         {notifications.map((notif) => {
           const getBg = () => {
             switch (notif.type) {
@@ -338,7 +342,7 @@ export default function App() {
           return (
             <div
               key={notif.id}
-              className={`pointer-events-auto rounded-xl border p-4 shadow-2xl backdrop-blur-md flex items-start gap-3 transition-all animate-in slide-in-from-bottom-2 ${getBg()}`}
+              className={`pointer-events-auto rounded-xl border p-3.5 sm:p-4 shadow-2xl backdrop-blur-md flex items-start gap-3 transition-all animate-in slide-in-from-bottom-2 ${getBg()}`}
             >
               <div className="shrink-0 mt-0.5">
                 {notif.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
@@ -354,7 +358,7 @@ export default function App() {
 
               <button
                 onClick={() => pluginRegistry.dismissNotification(notif.id)}
-                className="text-slate-500 hover:text-slate-300 shrink-0 p-1"
+                className="text-slate-500 hover:text-slate-300 shrink-0 p-1 min-h-[32px] min-w-[32px] flex items-center justify-center"
                 aria-label="Close notification"
               >
                 <X className="w-3.5 h-3.5" />
@@ -363,14 +367,6 @@ export default function App() {
           );
         })}
       </div>
-
-      {/* Quiet Footer */}
-      <footer className="border-t border-slate-900 py-6 px-4 text-center text-xs text-slate-500 space-y-1">
-        <p>PEM Tracker · Chronic Illness Recovery Pacing &amp; Energy Management</p>
-        <p className="text-[11px] text-slate-600">
-          Client-side SQLite3 · pCloud Drive Implicit OAuth · Extensible Plugin Architecture
-        </p>
-      </footer>
     </div>
   );
 }

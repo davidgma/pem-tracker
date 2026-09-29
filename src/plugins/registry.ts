@@ -15,6 +15,12 @@ import {
 import { dbService } from '../services/database.service';
 import { pcloudService } from '../services/pcloud.service';
 
+// Explicit imports for core built-in plugins to guarantee immediate synchronous registration
+import { helloWorldPlugin } from './hello-world';
+import { sqlConsolePlugin } from './sql-console';
+import { pacingTrackerPlugin } from './pacing-tracker';
+import { pcloudSyncPlugin } from './pcloud-sync';
+
 export class PluginRegistry {
   private static instance: PluginRegistry;
   private plugins: Map<string, Plugin> = new Map();
@@ -42,21 +48,39 @@ export class PluginRegistry {
   public async loadAllPlugins(): Promise<void> {
     if (this.isLoaded) return;
 
-    // Vite automatic directory glob discovery: looks for all plugins in subdirectories of /plugins/
-    const pluginModules = import.meta.glob<{ default?: Plugin; plugin?: Plugin }>(
-      './*/index.{ts,tsx}',
-      { eager: true }
-    );
+    // 1. Register built-in plugins first
+    const builtins: Plugin[] = [
+      pacingTrackerPlugin,
+      sqlConsolePlugin,
+      helloWorldPlugin,
+      pcloudSyncPlugin,
+    ];
 
-    const context = this.createPluginContext();
-
-    for (const path in pluginModules) {
-      const module = pluginModules[path];
-      const plugin = module.default || module.plugin;
+    for (const plugin of builtins) {
       if (plugin && plugin.metadata && plugin.metadata.id) {
         this.plugins.set(plugin.metadata.id, plugin);
       }
     }
+
+    // 2. Automatically scan directory for any additional dynamically added plugins
+    try {
+      const pluginModules = import.meta.glob<{ default?: Plugin; plugin?: Plugin }>(
+        './*/index.{ts,tsx}',
+        { eager: true }
+      );
+
+      for (const path in pluginModules) {
+        const module = pluginModules[path];
+        const plugin = module.default || module.plugin;
+        if (plugin && plugin.metadata && plugin.metadata.id) {
+          this.plugins.set(plugin.metadata.id, plugin);
+        }
+      }
+    } catch (globErr) {
+      console.warn('Plugin dynamic glob scanning warning:', globErr);
+    }
+
+    const context = this.createPluginContext();
 
     // Initialize all discovered plugins
     for (const [id, plugin] of this.plugins.entries()) {

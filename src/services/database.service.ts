@@ -42,16 +42,20 @@ export class DatabaseService {
 
       try {
         this.SQL = await initSqlJs({
-          locateFile: (file) => {
-            // Serve locally from public or fallback to CDN
-            return `/${file}`;
-          },
+          locateFile: (file) => `/${file}`,
         });
-      } catch (err) {
-        console.warn('Local wasm load fallback to CDN:', err);
-        this.SQL = await initSqlJs({
-          locateFile: () => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm',
-        });
+      } catch (localErr) {
+        console.warn('Local wasm load failed, trying sql.js.org CDN:', localErr);
+        try {
+          this.SQL = await initSqlJs({
+            locateFile: () => 'https://sql.js.org/dist/sql-wasm.wasm',
+          });
+        } catch (cdnErr) {
+          console.warn('Trying cdnjs fallback:', cdnErr);
+          this.SQL = await initSqlJs({
+            locateFile: () => 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.wasm',
+          });
+        }
       }
 
       // Check IndexedDB local cache first for fast offline startup
