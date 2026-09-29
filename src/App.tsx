@@ -138,14 +138,14 @@ export default function App() {
 
   if (isInitializing) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-300 space-y-4 px-4">
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center text-slate-700 space-y-4 px-4 font-sans">
         <div className="relative">
-          <div className="h-12 w-12 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400 animate-pulse">
+          <div className="h-12 w-12 rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600 animate-pulse shadow-sm">
             <HeartPulse className="w-6 h-6" />
           </div>
         </div>
         <div className="text-center space-y-1">
-          <p className="text-sm font-semibold text-white">Initializing PEM Tracker</p>
+          <p className="text-sm font-semibold text-slate-900">Initializing PEM Tracker</p>
           <p className="text-xs text-slate-500">
             Loading plugins &amp; preparing SQLite3 engine...
           </p>
@@ -155,41 +155,41 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-teal-500 selection:text-white">
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-teal-600 selection:text-white">
       {/* Strict Top Bar Contract: Zone 1 (Wordmark) — Zone 2 (4-6 nav links) — Zone 3 (Primary actions) */}
-      <header className="sticky top-0 z-40 bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 px-3 sm:px-6 lg:px-8">
+      <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200 px-3 sm:px-6 lg:px-8 shadow-xs">
         <div className="max-w-7xl mx-auto h-16 flex items-center justify-between gap-2 sm:gap-4">
           {/* Zone 1: Single text element wordmark */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => handleNavClick('dashboard')}
-              className="text-base sm:text-lg font-bold tracking-tight text-white hover:text-teal-400 transition-colors whitespace-nowrap flex items-center gap-2 text-left min-h-[44px]"
+              className="text-base sm:text-lg font-bold tracking-tight text-slate-900 hover:text-teal-700 transition-colors whitespace-nowrap flex items-center gap-2.5 text-left min-h-[44px]"
             >
-              <div className="h-8 w-8 rounded-lg bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-400 shrink-0">
+              <div className="h-8 w-8 rounded-lg bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600 shrink-0 shadow-xs">
                 <HeartPulse className="w-4 h-4" />
               </div>
-              <span className="tracking-tight">PEM Tracker</span>
+              <span className="tracking-tight text-slate-900">PEM Tracker</span>
             </button>
           </div>
 
           {/* Zone 2: Clean 4–6 text navigation links (Desktop) */}
-          <nav className="hidden md:flex items-center gap-1 text-xs font-medium">
+          <nav className="hidden md:flex items-center gap-1.5 text-xs font-medium">
             {navItems.map((item) => {
               const isActive = activeViewId === item.viewId;
               return (
                 <button
                   key={item.id}
                   onClick={() => handleNavClick(item.viewId)}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors whitespace-nowrap min-h-[40px] ${
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-colors whitespace-nowrap min-h-[40px] ${
                     isActive
-                      ? 'bg-teal-500/10 text-teal-400 font-semibold border border-teal-500/30 shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                      ? 'bg-teal-50 text-teal-800 font-semibold border border-teal-200 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                   }`}
                 >
-                  {renderIcon(item.icon, 'w-3.5 h-3.5')}
+                  {renderIcon(item.icon, `w-3.5 h-3.5 ${isActive ? 'text-teal-700' : 'text-slate-500'}`)}
                   <span>{item.label}</span>
                   {item.badge && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
                       {item.badge}
                     </span>
                   )}
@@ -208,13 +208,13 @@ export default function App() {
                   ? `pCloud: ${syncStatus.toUpperCase()} (Click to sync)`
                   : 'pCloud: Local Mode (Click to connect)'
               }
-              className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] shadow-xs ${
                 pcloudService.isAuthenticated()
-                  ? 'bg-slate-900 border-teal-500/30 text-teal-300 hover:bg-slate-800'
-                  : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200'
+                  ? 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-teal-400' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-teal-600' : 'text-slate-500'}`} />
               <span className="hidden sm:inline">
                 {pcloudService.isAuthenticated() ? 'pCloud Synced' : 'Local SQLite'}
               </span>
@@ -224,21 +224,21 @@ export default function App() {
             <div className="relative">
               <button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium transition-colors min-h-[40px]"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium transition-colors min-h-[40px] shadow-xs"
                 aria-label="Toggle Plugin Menu"
               >
-                <Menu className="w-4 h-4" />
+                <Menu className="w-4 h-4 text-slate-600" />
                 <span className="hidden sm:inline">Menu</span>
-                <ChevronDown className="w-3 h-3 text-slate-500" />
+                <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
 
               {isMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl p-2 z-50 text-xs divide-y divide-slate-800/60">
+                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-white border border-slate-200 shadow-xl p-2 z-50 text-xs divide-y divide-slate-100">
                   <div className="pb-1.5 px-2">
-                    <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                       Extensible Plugin Menu
                     </p>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[10px] text-slate-400">
                       Discovered plugins register items here
                     </p>
                   </div>
@@ -251,9 +251,9 @@ export default function App() {
                           item.action();
                           setIsMenuOpen(false);
                         }}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left text-slate-300 hover:text-white hover:bg-slate-800 transition-colors min-h-[40px]"
+                        className="w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left text-slate-700 hover:text-slate-900 hover:bg-slate-50 transition-colors min-h-[40px]"
                       >
-                        {renderIcon(item.icon, 'w-3.5 h-3.5 text-teal-400')}
+                        {renderIcon(item.icon, 'w-3.5 h-3.5 text-teal-600')}
                         <span>{item.label}</span>
                       </button>
                     ))}
@@ -262,15 +262,15 @@ export default function App() {
                   <div className="pt-1.5 px-2 text-[10px] text-slate-500 space-y-1">
                     <div className="flex justify-between">
                       <span>Database Engine:</span>
-                      <span className="text-slate-300 font-mono">SQLite3 WASM</span>
+                      <span className="text-slate-800 font-mono font-medium">SQLite3 WASM</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Storage Mutex:</span>
-                      <span className="text-teal-400 font-mono">Thread-Safe</span>
+                      <span className="text-teal-700 font-mono font-medium">Thread-Safe</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Target Host:</span>
-                      <span className="text-sky-300 font-mono">pem.freshfood.rocks</span>
+                      <span className="text-indigo-600 font-mono">pem.freshfood.rocks</span>
                     </div>
                   </div>
                 </div>
@@ -281,7 +281,7 @@ export default function App() {
       </header>
 
       {/* Mobile Navigation Strip (Touch-optimized horizontal scroll) */}
-      <div className="md:hidden border-b border-slate-800/80 bg-slate-950 px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar">
+      <div className="md:hidden border-b border-slate-200 bg-white px-3 py-2 flex items-center gap-2 overflow-x-auto no-scrollbar shadow-xs">
         {navItems.map((item) => {
           const isActive = activeViewId === item.viewId;
           return (
@@ -290,11 +290,11 @@ export default function App() {
               onClick={() => handleNavClick(item.viewId)}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs whitespace-nowrap font-medium transition-colors min-h-[40px] shrink-0 ${
                 isActive
-                  ? 'bg-teal-500/10 text-teal-400 border border-teal-500/30'
-                  : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800/60'
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200 font-semibold'
+                  : 'text-slate-600 hover:text-slate-900 bg-slate-50 border border-slate-200'
               }`}
             >
-              {renderIcon(item.icon, 'w-3.5 h-3.5')}
+              {renderIcon(item.icon, `w-3.5 h-3.5 ${isActive ? 'text-teal-700' : 'text-slate-500'}`)}
               <span>{item.label}</span>
             </button>
           );
@@ -323,42 +323,42 @@ export default function App() {
         )}
       </main>
 
-      {/* Global Notifications / Toast Center */}
+      {/* Global Notifications / Toast Center (Light Theme) */}
       <div className="fixed bottom-4 right-4 left-4 sm:left-auto z-50 flex flex-col gap-2 max-w-sm w-auto pointer-events-none">
         {notifications.map((notif) => {
           const getBg = () => {
             switch (notif.type) {
               case 'success':
-                return 'bg-slate-900 border-emerald-500/40 text-emerald-200';
+                return 'bg-white border-emerald-300 text-emerald-950 shadow-lg';
               case 'warning':
-                return 'bg-slate-900 border-amber-500/40 text-amber-200';
+                return 'bg-white border-amber-300 text-amber-950 shadow-lg';
               case 'error':
-                return 'bg-slate-900 border-rose-500/40 text-rose-200';
+                return 'bg-white border-rose-300 text-rose-950 shadow-lg';
               default:
-                return 'bg-slate-900 border-teal-500/40 text-teal-200';
+                return 'bg-white border-teal-300 text-teal-950 shadow-lg';
             }
           };
 
           return (
             <div
               key={notif.id}
-              className={`pointer-events-auto rounded-xl border p-3.5 sm:p-4 shadow-2xl backdrop-blur-md flex items-start gap-3 transition-all animate-in slide-in-from-bottom-2 ${getBg()}`}
+              className={`pointer-events-auto rounded-xl border p-3.5 sm:p-4 shadow-lg backdrop-blur-md flex items-start gap-3 transition-all animate-in slide-in-from-bottom-2 ${getBg()}`}
             >
               <div className="shrink-0 mt-0.5">
-                {notif.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-                {notif.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
-                {notif.type === 'warning' && <AlertCircle className="w-4 h-4 text-amber-400" />}
-                {notif.type === 'info' && <Info className="w-4 h-4 text-teal-400" />}
+                {notif.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-600" />}
+                {notif.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-600" />}
+                {notif.type === 'warning' && <AlertCircle className="w-4 h-4 text-amber-600" />}
+                {notif.type === 'info' && <Info className="w-4 h-4 text-teal-600" />}
               </div>
 
               <div className="flex-1 space-y-0.5 text-xs">
-                <p className="font-semibold text-white">{notif.title}</p>
-                <p className="text-slate-300 leading-relaxed text-[11px]">{notif.message}</p>
+                <p className="font-semibold text-slate-900">{notif.title}</p>
+                <p className="text-slate-600 leading-relaxed text-[11px]">{notif.message}</p>
               </div>
 
               <button
                 onClick={() => pluginRegistry.dismissNotification(notif.id)}
-                className="text-slate-500 hover:text-slate-300 shrink-0 p-1 min-h-[32px] min-w-[32px] flex items-center justify-center"
+                className="text-slate-400 hover:text-slate-600 shrink-0 p-1 min-h-[32px] min-w-[32px] flex items-center justify-center"
                 aria-label="Close notification"
               >
                 <X className="w-3.5 h-3.5" />

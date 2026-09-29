@@ -11,7 +11,7 @@ export interface PluginMetadata {
   id: string;
   name: string;
   version: string;
-  author: string;
+  author?: string;
   description: string;
   icon?: string;
   isRemovable?: boolean;
