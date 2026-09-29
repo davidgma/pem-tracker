@@ -11,6 +11,8 @@ export interface PEMRecord {
   eye_stinging: number; // 0 - 10
   general_malaise: number; // 0 - 10
   brain_fog: number; // 0 - 10
+  client_uuid?: string;
+  updated_at?: string;
 }
 
 export interface ActivityRecord {
@@ -28,6 +30,8 @@ export interface ActivityRecord {
   end_vigorous: number;
   start_peak: number;
   end_peak: number;
+  client_uuid?: string;
+  updated_at?: string;
 }
 
 export interface ComputedActivityMetrics {
@@ -47,4 +51,4 @@ export interface QueryExecutionResult {
   rowsAffected?: number;
 }
 
-export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'offline' | 'error';
+export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'merging' | 'offline' | 'error';

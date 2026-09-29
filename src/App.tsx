@@ -205,18 +205,38 @@ export default function App() {
               onClick={handleManualSync}
               title={
                 pcloudService.isAuthenticated()
-                  ? `pCloud: ${syncStatus.toUpperCase()} (Click to sync)`
+                  ? `pCloud: ${syncStatus.toUpperCase()} (Click to check/sync)`
                   : 'pCloud: Local Mode (Click to connect)'
               }
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] shadow-xs ${
                 pcloudService.isAuthenticated()
-                  ? 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
+                  ? syncStatus === 'pending'
+                    ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                    : syncStatus === 'merging'
+                    ? 'bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100'
+                    : 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-teal-600' : 'text-slate-500'}`} />
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  isSyncing || syncStatus === 'syncing' || syncStatus === 'merging'
+                    ? 'animate-spin text-teal-600'
+                    : syncStatus === 'pending'
+                    ? 'text-amber-600'
+                    : 'text-teal-600'
+                }`}
+              />
               <span className="hidden sm:inline">
-                {pcloudService.isAuthenticated() ? 'pCloud Synced' : 'Local SQLite'}
+                {pcloudService.isAuthenticated()
+                  ? syncStatus === 'pending'
+                    ? 'Auto-Pushing...'
+                    : syncStatus === 'merging'
+                    ? 'Merging Devices...'
+                    : syncStatus === 'syncing'
+                    ? 'Syncing...'
+                    : 'pCloud Synced'
+                  : 'Local SQLite'}
               </span>
             </button>
 
