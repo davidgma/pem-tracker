@@ -19,6 +19,7 @@ export interface PCloudAuthConfig {
   redirectUri: string;
   region: 'us' | 'eu';
   corsProxyUrl?: string;
+  sharedLinkUrl?: string;
 }
 
 export interface SyncLogEntry {
@@ -451,7 +452,16 @@ export class PCloudService {
    * Helper to download the remote binary file safely in client-side environments
    */
   private async fetchRemoteBinary(): Promise<Uint8Array> {
-    // 1. If user configured an optional CORS proxy URL (e.g. Cloudflare Worker or proxy for GitHub Pages)
+    // 1. If user configured a shared link URL, try it first
+    if (this.config.sharedLinkUrl && this.config.sharedLinkUrl.trim()) {
+      try {
+        return await this.fetchSharedLinkBinary();
+      } catch (err) {
+        console.warn('Shared link fetch attempt:', err);
+      }
+    }
+
+    // 2. If user configured an optional CORS proxy URL (e.g. Cloudflare Worker or proxy for GitHub Pages)
     if (this.config.corsProxyUrl) {
       try {
         const proxyTarget = `${this.getApiHost()}/getfilelink?path=/PEMTracker/pem_database.sqlite&access_token=${this.accessToken}`;
@@ -472,7 +482,7 @@ export class PCloudService {
       }
     }
 
-    // 2. Direct pCloud call
+    // 3. Direct pCloud call
     const linkRes = await fetch(
       `${this.getApiHost()}/getfilelink?path=/PEMTracker/pem_database.sqlite&access_token=${this.accessToken}`
     );
@@ -494,6 +504,152 @@ export class PCloudService {
 
     const arrayBuffer = await fileResp.arrayBuffer();
     return new Uint8Array(arrayBuffer);
+  }
+
+  /**
+   * Downloads the raw SQLite binary from a pCloud shared link or direct URL
+   */
+  public async fetchSharedLinkBinary(overrideUrl?: string): Promise<Uint8Array> {
+    const rawUrl = (overrideUrl || this.config.sharedLinkUrl || '').trim();
+    if (!rawUrl) {
+      throw new Error('No shared link URL configured');
+    }
+
+    const downloadUrlsToTry: string[] = [];
+
+    // Check if URL is or contains a pCloud public link code (e.g. u.pcloud.link/publink/show?code=... or code)
+    let publinkCode: string | null = null;
+    const isEu =
+      rawUrl.includes('e.pcloud.link') ||
+      rawUrl.includes('eapi.pcloud.com') ||
+      this.config.region === 'eu';
+
+    try {
+      if (rawUrl.startsWith('http')) {
+        const parsed = new URL(rawUrl);
+        publinkCode = parsed.searchParams.get('code');
+      } else if (/^[A-Za-z0-9_-]+$/.test(rawUrl)) {
+        publinkCode = rawUrl;
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+
+    if (publinkCode) {
+      // Use pCloud public link API to get direct download hosts
+      try {
+        const apiHost = isEu ? 'https://eapi.pcloud.com' : 'https://api.pcloud.com';
+        const pubRes = await fetch(`${apiHost}/getpublinkdownload?code=${encodeURIComponent(publinkCode)}`);
+        const pubData = await pubRes.json();
+        if (pubData.result === 0 && pubData.hosts && pubData.hosts.length > 0) {
+          downloadUrlsToTry.push(`https://${pubData.hosts[0]}${pubData.path}`);
+        }
+      } catch (e) {
+        console.warn('Could not resolve publinkdownload directly:', e);
+      }
+    }
+
+    // Also try the raw URL directly (works if user provided a direct file link like filedn.com or custom CDN/proxy)
+    if (rawUrl.startsWith('http')) {
+      downloadUrlsToTry.push(rawUrl);
+    }
+
+    // If a CORS proxy is configured, try proxying the URL
+    if (this.config.corsProxyUrl && downloadUrlsToTry.length > 0) {
+      const firstTarget = downloadUrlsToTry[0];
+      const proxied = `${this.config.corsProxyUrl.replace(/\/+$/, '')}/${encodeURIComponent(firstTarget)}`;
+      downloadUrlsToTry.unshift(proxied);
+    }
+
+    if (downloadUrlsToTry.length === 0) {
+      throw new Error('Invalid shared link format. Please provide a valid pCloud shared link or direct URL.');
+    }
+
+    let lastError: any = null;
+    for (const url of downloadUrlsToTry) {
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        }
+        const arrayBuf = await resp.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuf);
+
+        // SQLite validation
+        if (bytes.length < 16) {
+          throw new Error('Downloaded file is empty or too small.');
+        }
+
+        const headerStr = String.fromCharCode(...bytes.subarray(0, 15));
+        if (!headerStr.startsWith('SQLite format 3')) {
+          const sampleText = new TextDecoder().decode(bytes.subarray(0, 120));
+          if (sampleText.toLowerCase().includes('<html') || sampleText.toLowerCase().includes('<!doctype')) {
+            throw new Error('The provided URL returned a web page (HTML) rather than the SQLite database file.');
+          }
+          throw new Error('The downloaded file is not a valid SQLite3 database.');
+        }
+
+        return bytes;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    throw lastError || new Error('Failed to download database from shared link');
+  }
+
+  /**
+   * Fetches database from shared link and loads it into the local SQLite engine
+   */
+  public async loadFromSharedLink(
+    overrideUrl?: string
+  ): Promise<{ success: boolean; size: number; message: string }> {
+    const urlToUse = overrideUrl || this.config.sharedLinkUrl;
+    if (!urlToUse) {
+      throw new Error('No shared link URL provided');
+    }
+
+    this.setSyncStatus('syncing');
+    try {
+      const bytes = await this.fetchSharedLinkBinary(urlToUse);
+      await dbService.loadDatabaseBinary(bytes);
+      this.lastSyncedTime = new Date();
+      this.setSyncStatus('synced');
+      this.logSync('pull', 'Loaded from Shared Link', `Restored ${bytes.byteLength} bytes from pCloud share URL`);
+      return {
+        success: true,
+        size: bytes.byteLength,
+        message: `Successfully loaded database (${(bytes.byteLength / 1024).toFixed(1)} KB) into SQLite engine.`,
+      };
+    } catch (e: any) {
+      this.setSyncStatus('error');
+      this.logSync('error', 'Shared link load failed', e.message);
+      throw e;
+    }
+  }
+
+  /**
+   * Startup sync handler called on page load/refresh
+   */
+  public async initializeStartupSync(): Promise<void> {
+    // 1. If shared link is configured, load fresh database on startup
+    if (this.config.sharedLinkUrl && this.config.sharedLinkUrl.trim()) {
+      try {
+        await this.loadFromSharedLink();
+        return;
+      } catch (err: any) {
+        console.warn('Initial load from shared link notice:', err.message);
+      }
+    }
+
+    // 2. If authenticated via OAuth token, check remote and pull any updates
+    if (this.accessToken) {
+      try {
+        await this.checkRemoteAndReconcile('page_startup');
+      } catch (err: any) {
+        console.warn('Initial pCloud reconciliation notice:', err.message);
+      }
+    }
   }
 
   /**

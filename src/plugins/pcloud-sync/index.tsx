@@ -25,6 +25,9 @@ import {
   Radio,
   Clock,
   ArrowDownUp,
+  Link2,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { PCloudUser, SyncLogEntry } from '../../services/pcloud.service';
 
@@ -36,6 +39,9 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
   const [manualToken, setManualToken] = useState('');
   const [dbSize, setDbSize] = useState<number>(0);
   const [syncLogs, setSyncLogs] = useState<SyncLogEntry[]>(context.pcloud.getSyncLogs());
+  const [sharedLinkInput, setSharedLinkInput] = useState(config.sharedLinkUrl || '');
+  const [showSharedLink, setShowSharedLink] = useState(false);
+  const [isFetchingShared, setIsFetchingShared] = useState(false);
 
   const refreshDbSize = async () => {
     try {
@@ -90,6 +96,26 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
       context.showNotification('Connection Error', err.message || 'Failed to authenticate token', 'error');
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleSaveAndFetchSharedLink = async () => {
+    const trimmed = sharedLinkInput.trim();
+    handleUpdateConfig({ sharedLinkUrl: trimmed });
+    if (!trimmed) {
+      context.showNotification('Shared Link Removed', 'Startup shared link sync is disabled.', 'info');
+      return;
+    }
+
+    try {
+      setIsFetchingShared(true);
+      const res = await context.pcloud.loadFromSharedLink(trimmed);
+      context.showNotification('Database Loaded', res.message, 'success');
+      refreshDbSize();
+    } catch (err: any) {
+      context.showNotification('Shared Link Failed', err.message || 'Could not load database from URL', 'error');
+    } finally {
+      setIsFetchingShared(false);
     }
   };
 
@@ -385,6 +411,23 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
               </button>
             </div>
           </div>
+
+          <div className="space-y-1.5 md:col-span-2">
+            <label className="text-slate-700 font-medium flex items-center justify-between">
+              <span>Optional CORS Proxy URL (For Automated Two-Way Sync on GitHub Pages)</span>
+              <span className="text-[10px] text-teal-600 font-normal">Enables remote binary pulls</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. https://my-cors-proxy.workers.dev (Leave empty for direct mode)"
+              value={config.corsProxyUrl || ''}
+              onChange={(e) => handleUpdateConfig({ corsProxyUrl: e.target.value })}
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 text-slate-800 font-mono focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+            />
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              pCloud allows direct browser uploads, but blocks direct browser downloads from third-party web domains (Error 7010: Referer check). If you want automated two-way sync on GitHub Pages without manual file imports, enter a serverless CORS proxy (like a free Cloudflare Worker).
+            </p>
+          </div>
         </div>
 
         <div className="pt-2 flex flex-wrap items-center gap-3">
@@ -402,6 +445,76 @@ const PCloudSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
             <ExternalLink className="w-3.5 h-3.5" />
             <span>Sign in (European Region)</span>
           </button>
+        </div>
+      </div>
+
+      {/* Shared Link / Public Download URL Card */}
+      <div className="rounded-xl border border-teal-200 bg-white p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2">
+            <Link2 className="w-4 h-4 text-teal-600" />
+            <h3 className="text-sm font-semibold text-slate-900">
+              Shared Link / Direct Database URL (One-Way Cloud &rarr; Local Sync)
+            </h3>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200">
+            Startup &amp; Refresh Sync
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Paste your pCloud share link (e.g. <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-slate-700">https://u.pcloud.link/publink/show?code=...</code>) or direct database URL below. It will be stored securely in your browser&apos;s persistent local storage (never committed to git or exposed to third parties) and used to pull your latest SQLite database every time you open or refresh the app.
+        </p>
+
+        <div className="space-y-3">
+          <div className="relative">
+            <input
+              type={showSharedLink ? 'text' : 'password'}
+              placeholder="Paste your pCloud shared link or direct database URL..."
+              value={sharedLinkInput}
+              onChange={(e) => setSharedLinkInput(e.target.value)}
+              className="w-full bg-white border border-slate-300 rounded-lg p-2.5 pr-20 text-xs text-slate-900 font-mono focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+            />
+            <button
+              type="button"
+              onClick={() => setShowSharedLink(!showSharedLink)}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+              title={showSharedLink ? 'Hide URL' : 'Show URL'}
+            >
+              {showSharedLink ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleSaveAndFetchSharedLink}
+              disabled={isFetchingShared}
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-xs transition-colors shadow-sm min-h-[40px] disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isFetchingShared ? 'animate-spin' : ''}`} />
+              <span>{isFetchingShared ? 'Connecting & Downloading...' : 'Save & Fetch Now'}</span>
+            </button>
+
+            {config.sharedLinkUrl && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSharedLinkInput('');
+                  handleUpdateConfig({ sharedLinkUrl: '' });
+                  context.showNotification('Cleared', 'Shared link removed from browser storage', 'info');
+                }}
+                className="px-3 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-600 text-xs border border-slate-200 transition-colors min-h-[40px]"
+              >
+                Clear Link
+              </button>
+            )}
+
+            <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5 text-teal-600" />
+              <span>Stored locally on this device only.</span>
+            </div>
+          </div>
         </div>
       </div>
 

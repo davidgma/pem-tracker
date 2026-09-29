@@ -65,6 +65,9 @@ export default function App() {
 
         // 2. Initialize SQLite WASM storage & local cache
         await dbService.initialize();
+
+        // 3. Initialize startup sync (fetch from shared link or remote cloud if configured)
+        await pcloudService.initializeStartupSync();
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
