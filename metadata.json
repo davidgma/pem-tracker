@@ -1,6 +1,6 @@
 {
   "name": "PEM Tracker",
-  "description": "Client-side pacing and daily energy expenditure tracking for chronic illness recovery with SQLite3, pCloud sync, and dynamic plugin architecture.",
+  "description": "Client-side pacing and daily energy expenditure tracking for chronic illness recovery with SQLite3, Dropbox sync, and dynamic plugin architecture.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -13,13 +13,13 @@ import {
   AppNotification,
 } from './plugin.types';
 import { dbService } from '../services/database.service';
-import { pcloudService } from '../services/pcloud.service';
+import { dropboxService } from '../services/dropbox.service';
 
 // Explicit imports for core built-in plugins to guarantee immediate synchronous registration
 import { helloWorldPlugin } from './hello-world';
 import { sqlConsolePlugin } from './sql-console';
 import { pacingTrackerPlugin } from './pacing-tracker';
-import { pcloudSyncPlugin } from './pcloud-sync';
+import { dropboxSyncPlugin } from './dropbox-sync';
 
 export class PluginRegistry {
   private static instance: PluginRegistry;
@@ -53,7 +53,7 @@ export class PluginRegistry {
       pacingTrackerPlugin,
       sqlConsolePlugin,
       helloWorldPlugin,
-      pcloudSyncPlugin,
+      dropboxSyncPlugin,
     ];
 
     for (const plugin of builtins) {
@@ -106,7 +106,7 @@ export class PluginRegistry {
   public createPluginContext(): PluginContext {
     return {
       database: dbService,
-      pcloud: pcloudService,
+      dropbox: dropboxService,
       registerNavItem: (item: PluginNavItem) => {
         const existingIdx = this.navItems.findIndex((n) => n.id === item.id);
         if (existingIdx >= 0) {

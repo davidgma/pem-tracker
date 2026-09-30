@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { DatabaseService } from '../services/database.service';
-import { PCloudService } from '../services/pcloud.service';
+import { DropboxService } from '../services/dropbox.service';
 
 export interface PluginMetadata {
   id: string;
@@ -59,7 +59,7 @@ export interface AppNotification {
 
 export interface PluginContext {
   database: DatabaseService;
-  pcloud: PCloudService;
+  dropbox: DropboxService;
   registerNavItem(item: PluginNavItem): void;
   registerMenuItem(item: PluginMenuItem): void;
   registerView(view: PluginView): void;

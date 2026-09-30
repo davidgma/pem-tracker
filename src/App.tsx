@@ -6,12 +6,12 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { pluginRegistry } from './plugins/registry';
 import { dbService } from './services/database.service';
-import { pcloudService } from './services/pcloud.service';
+import { dropboxService } from './services/dropbox.service';
 import {
   HeartPulse,
   Database,
   Globe,
-  Cloud,
+  FolderSync,
   Menu,
   X,
   RefreshCw,
@@ -35,8 +35,9 @@ const renderIcon = (name: string, className = 'w-4 h-4') => {
       return <Database className={className} />;
     case 'globe':
       return <Globe className={className} />;
+    case 'foldersync':
     case 'cloud':
-      return <Cloud className={className} />;
+      return <FolderSync className={className} />;
     default:
       return <Layers className={className} />;
   }
@@ -66,8 +67,11 @@ export default function App() {
         // 2. Initialize SQLite WASM storage & local cache
         await dbService.initialize();
 
-        // 3. Initialize startup sync (fetch from shared link or remote cloud if configured)
-        await pcloudService.initializeStartupSync();
+        // 3. Check for OAuth callback (PKCE or token flow)
+        await dropboxService.handleOAuthCallback();
+
+        // 4. Initialize startup sync (fetch latest database from Dropbox if authenticated)
+        await dropboxService.initializeStartupSync();
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
@@ -85,8 +89,8 @@ export default function App() {
       setNotifications([...pluginRegistry.getNotifications()]);
     });
 
-    // Subscribe to pCloud sync status
-    const unsubSync = pcloudService.onStatusChange((status) => {
+    // Subscribe to Dropbox sync status
+    const unsubSync = dropboxService.onStatusChange((status) => {
       setSyncStatus(status);
     });
 
@@ -103,16 +107,16 @@ export default function App() {
   };
 
   const handleManualSync = async () => {
-    if (!pcloudService.isAuthenticated()) {
-      handleNavClick('pcloud-sync');
+    if (!dropboxService.isAuthenticated()) {
+      handleNavClick('dropbox-sync');
       return;
     }
     setIsSyncing(true);
     try {
-      await pcloudService.syncWithPCloud();
+      await dropboxService.syncWithDropbox();
       pluginRegistry.addNotification(
         'Database Synchronized',
-        'SQLite database updated to pCloud drive successfully',
+        'SQLite database updated to Dropbox drive successfully',
         'success'
       );
     } catch (e: any) {
@@ -203,42 +207,42 @@ export default function App() {
 
           {/* Zone 3: 1–2 primary actions + menu */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* pCloud Sync quick status button */}
+            {/* Dropbox Sync quick status button */}
             <button
               onClick={handleManualSync}
               title={
-                pcloudService.isAuthenticated()
-                  ? `pCloud: ${syncStatus.toUpperCase()} (Click to check/sync)`
-                  : 'pCloud: Local Mode (Click to connect)'
+                dropboxService.isAuthenticated()
+                  ? `Dropbox: ${syncStatus.toUpperCase()} (Click to check/sync)`
+                  : 'Dropbox: Local Mode (Click to connect)'
               }
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] shadow-xs ${
-                pcloudService.isAuthenticated()
+                dropboxService.isAuthenticated()
                   ? syncStatus === 'pending'
                     ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
                     : syncStatus === 'merging'
                     ? 'bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100'
-                    : 'bg-teal-50 border-teal-200 text-teal-800 hover:bg-teal-100'
+                    : 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
                   : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <RefreshCw
                 className={`w-3.5 h-3.5 ${
                   isSyncing || syncStatus === 'syncing' || syncStatus === 'merging'
-                    ? 'animate-spin text-teal-600'
+                    ? 'animate-spin text-blue-600'
                     : syncStatus === 'pending'
                     ? 'text-amber-600'
-                    : 'text-teal-600'
+                    : 'text-blue-600'
                 }`}
               />
               <span className="hidden sm:inline">
-                {pcloudService.isAuthenticated()
+                {dropboxService.isAuthenticated()
                   ? syncStatus === 'pending'
                     ? 'Auto-Pushing...'
                     : syncStatus === 'merging'
                     ? 'Merging Devices...'
                     : syncStatus === 'syncing'
                     ? 'Syncing...'
-                    : 'pCloud Synced'
+                    : 'Dropbox Synced'
                   : 'Local SQLite'}
               </span>
             </button>

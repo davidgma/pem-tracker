@@ -51,4 +51,4 @@ export interface QueryExecutionResult {
   rowsAffected?: number;
 }
 
-export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'merging' | 'offline' | 'error';
+export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'merging' | 'offline' | 'error' | 'conflict';
