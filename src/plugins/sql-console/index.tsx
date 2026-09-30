@@ -28,6 +28,24 @@ import {
   FolderOpen,
   Bookmark,
 } from 'lucide-react';
+import { format as formatSql } from 'sql-formatter';
+
+/**
+ * Prettify and format SQL statements with uppercase keywords and standardized indentation
+ */
+export function prettifySql(rawSql: string): string {
+  if (!rawSql || !rawSql.trim()) return rawSql;
+  try {
+    return formatSql(rawSql, {
+      language: 'sqlite',
+      keywordCase: 'upper',
+      tabWidth: 2,
+    });
+  } catch (e) {
+    console.warn('SQL formatting notice:', e);
+    return rawSql;
+  }
+}
 
 const SQL_KEYWORDS = new Set([
   'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE',
@@ -132,9 +150,20 @@ function renderSqlHighlighted(code: string): React.ReactNode[] {
 const SqlSyntaxEditor: React.FC<{
   value: string;
   onChange: (val: string) => void;
-  onRun: () => void;
+  onRun?: () => void;
   disabled?: boolean;
-}> = ({ value, onChange, onRun, disabled }) => {
+  minHeightClass?: string;
+  placeholder?: string;
+  showPrettify?: boolean;
+}> = ({
+  value,
+  onChange,
+  onRun,
+  disabled,
+  minHeightClass = 'min-h-[140px] sm:min-h-[160px]',
+  placeholder = 'Enter SQL statement here (e.g. SELECT * FROM t_activities;)',
+  showPrettify = true,
+}) => {
   const preRef = useRef<HTMLPreElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -146,10 +175,18 @@ const SqlSyntaxEditor: React.FC<{
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && onRun) {
       e.preventDefault();
       onRun();
     }
+  };
+
+  const handlePrettify = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!value.trim()) return;
+    const formatted = prettifySql(value);
+    onChange(formatted);
   };
 
   const highlightedNodes = useMemo(() => {
@@ -157,12 +194,26 @@ const SqlSyntaxEditor: React.FC<{
   }, [value]);
 
   return (
-    <div className="relative rounded-xl border border-slate-300 bg-white font-mono text-sm shadow-sm overflow-hidden focus-within:border-teal-600 focus-within:ring-2 focus-within:ring-teal-100 transition-all">
+    <div className="relative rounded-xl border border-slate-300 bg-white font-mono text-sm shadow-sm overflow-hidden focus-within:border-teal-600 focus-within:ring-2 focus-within:ring-teal-100 transition-all group">
+      {/* Corner Quick Prettify Action */}
+      {showPrettify && (
+        <button
+          type="button"
+          onClick={handlePrettify}
+          disabled={disabled || !value.trim()}
+          className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/95 hover:bg-slate-100 text-slate-600 hover:text-teal-700 border border-slate-200/90 shadow-xs text-[11px] font-sans font-medium transition-all backdrop-blur-xs disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+          title="Prettify & Format SQL statement"
+        >
+          <Sparkles className="w-3 h-3 text-teal-600" />
+          <span>Prettify</span>
+        </button>
+      )}
+
       {/* Syntax Highlighted Mirror (Absolute background) */}
       <pre
         ref={preRef}
         aria-hidden="true"
-        className="absolute inset-0 p-3.5 pointer-events-none whitespace-pre-wrap break-words leading-relaxed font-mono text-sm overflow-auto text-slate-800 select-none"
+        className={`absolute inset-0 p-3.5 pointer-events-none whitespace-pre-wrap break-words leading-relaxed font-mono text-sm overflow-auto text-slate-800 select-none ${minHeightClass}`}
       >
         {highlightedNodes}
         {/* Trailing newline spacer so scroll height matches textarea */}
@@ -177,9 +228,9 @@ const SqlSyntaxEditor: React.FC<{
         onScroll={handleScroll}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        placeholder="Enter SQL statement here (e.g. SELECT * FROM t_activities;)"
+        placeholder={placeholder}
         spellCheck={false}
-        className="relative block w-full min-h-[140px] sm:min-h-[160px] p-3.5 bg-transparent text-transparent caret-slate-900 resize-y whitespace-pre-wrap break-words leading-relaxed font-mono text-sm outline-none overflow-auto z-10 selection:bg-teal-100 selection:text-transparent"
+        className={`relative block w-full p-3.5 bg-transparent text-transparent caret-slate-900 resize-y whitespace-pre-wrap break-words leading-relaxed font-mono text-sm outline-none overflow-auto z-10 selection:bg-teal-100 selection:text-transparent ${minHeightClass}`}
       />
     </div>
   );
@@ -197,6 +248,8 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isCreatingCategory, setIsCreatingCategory] = useState<boolean>(false);
+  const [newCategoryInput, setNewCategoryInput] = useState<string>('');
   const [modalForm, setModalForm] = useState<{
     id?: number;
     name: string;
@@ -249,19 +302,37 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
     handleRunQuery(q.sql_text);
   };
 
+  const existingCategories = useMemo(() => {
+    const cats = new Set<string>();
+    savedQueries.forEach((q) => {
+      if (q.category && q.category.trim()) cats.add(q.category.trim());
+    });
+    if (cats.size === 0) {
+      ['PEM Tracking', 'Activities', 'Rollups', 'Analysis', 'Schema', 'Settings', 'Custom'].forEach(
+        (c) => cats.add(c)
+      );
+    }
+    return Array.from(cats).sort();
+  }, [savedQueries]);
+
   const handleOpenCreateModal = () => {
+    const defaultCat =
+      activeCategory !== 'All' ? activeCategory : existingCategories[0] || 'Custom';
     setModalForm({
       id: undefined,
       name: '',
       description: '',
-      category: activeCategory !== 'All' ? activeCategory : 'Custom',
+      category: defaultCat,
       sql_text: sql || '',
     });
+    setIsCreatingCategory(false);
+    setNewCategoryInput('');
     setIsModalOpen(true);
   };
 
   const handleOpenEditModal = (q: SqlQueryRecord, e: React.MouseEvent) => {
     e.stopPropagation();
+    const isKnown = existingCategories.includes(q.category || '');
     setModalForm({
       id: q.id,
       name: q.name,
@@ -269,7 +340,19 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
       category: q.category || 'General',
       sql_text: q.sql_text,
     });
+    if (!isKnown && q.category) {
+      setIsCreatingCategory(true);
+      setNewCategoryInput(q.category);
+    } else {
+      setIsCreatingCategory(false);
+      setNewCategoryInput('');
+    }
     setIsModalOpen(true);
+  };
+
+  const handlePrettifyMainSql = () => {
+    if (!sql.trim()) return;
+    setSql(prettifySql(sql));
   };
 
   const handleSaveModal = async (e: React.FormEvent) => {
@@ -561,7 +644,19 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
             <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
             <span>SQL Statement Editor</span>
           </span>
-          <span className="hidden sm:inline text-slate-400">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[10px] text-slate-600">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[10px] text-slate-600">Enter</kbd> to execute</span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handlePrettifyMainSql}
+              disabled={isRunning || !sql.trim()}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors disabled:opacity-40"
+              title="Prettify & format SQL with uppercase keywords and indentation"
+            >
+              <Sparkles className="w-3 h-3 text-teal-600" />
+              <span>Prettify SQL</span>
+            </button>
+            <span className="hidden sm:inline text-slate-400">Press <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[10px] text-slate-600">Ctrl</kbd> + <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[10px] text-slate-600">Enter</kbd> to execute</span>
+          </div>
         </div>
 
         {/* Real-Time Syntax Highlighted Editor */}
@@ -591,6 +686,17 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
                   <span>Execute SQL</span>
                 </>
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrettifyMainSql}
+              disabled={isRunning || !sql.trim()}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors shadow-sm min-h-[42px] disabled:opacity-40"
+              title="Prettify and format SQL query"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+              <span>Prettify SQL</span>
             </button>
 
             <button
@@ -774,16 +880,71 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Category
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Analysis, Activities, PEM Tracking"
-                    value={modalForm.category}
-                    onChange={(e) => setModalForm({ ...modalForm, category: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Category *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const nextState = !isCreatingCategory;
+                        setIsCreatingCategory(nextState);
+                        if (!nextState) {
+                          setModalForm({
+                            ...modalForm,
+                            category: existingCategories[0] || 'Custom',
+                          });
+                        } else {
+                          setNewCategoryInput('');
+                        }
+                      }}
+                      className="text-[11px] font-medium text-teal-600 hover:text-teal-700 hover:underline flex items-center gap-0.5"
+                    >
+                      {isCreatingCategory ? (
+                        <span>Pick existing</span>
+                      ) : (
+                        <>
+                          <Plus className="w-3 h-3" />
+                          <span>New category</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {isCreatingCategory ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      required
+                      placeholder="e.g. Vitals, Nutrition, Labs"
+                      value={newCategoryInput}
+                      onChange={(e) => {
+                        setNewCategoryInput(e.target.value);
+                        setModalForm({ ...modalForm, category: e.target.value });
+                      }}
+                      className="w-full bg-white border border-teal-500 ring-1 ring-teal-500 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none"
+                    />
+                  ) : (
+                    <select
+                      value={modalForm.category}
+                      onChange={(e) => {
+                        if (e.target.value === '__CREATE_NEW__') {
+                          setIsCreatingCategory(true);
+                          setNewCategoryInput('');
+                        } else {
+                          setModalForm({ ...modalForm, category: e.target.value });
+                        }
+                      }}
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                    >
+                      {existingCategories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                      <option value="__CREATE_NEW__">+ Create new category...</option>
+                    </select>
+                  )}
                 </div>
 
                 <div>
@@ -801,16 +962,31 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  SQL Statement *
-                </label>
-                <textarea
-                  required
-                  rows={6}
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    SQL Statement *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const formatted = prettifySql(modalForm.sql_text);
+                      setModalForm({ ...modalForm, sql_text: formatted });
+                    }}
+                    disabled={!modalForm.sql_text.trim()}
+                    className="flex items-center gap-1 px-2.5 py-0.5 rounded text-[11px] font-medium text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors disabled:opacity-40"
+                    title="Prettify & format SQL with uppercase keywords and indentation"
+                  >
+                    <Sparkles className="w-3 h-3 text-teal-600" />
+                    <span>Prettify SQL</span>
+                  </button>
+                </div>
+
+                {/* Real-time Syntax Highlighted Editor inside Modal */}
+                <SqlSyntaxEditor
                   value={modalForm.sql_text}
-                  onChange={(e) => setModalForm({ ...modalForm, sql_text: e.target.value })}
+                  onChange={(val) => setModalForm({ ...modalForm, sql_text: val })}
                   placeholder="SELECT * FROM t_pems;"
-                  className="w-full font-mono text-xs bg-slate-50 border border-slate-300 rounded-lg p-3 text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600 leading-relaxed"
+                  minHeightClass="min-h-[160px]"
                 />
               </div>
 
