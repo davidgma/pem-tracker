@@ -18,6 +18,9 @@ import {
   Plus,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Footprints,
+  Activity,
   Info,
   ChevronDown,
   Layers,
@@ -28,8 +31,16 @@ import { PluginNavItem, PluginMenuItem, AppNotification } from './plugins/plugin
 const renderIcon = (name: string, className = 'w-4 h-4') => {
   switch (name.toLowerCase()) {
     case 'heartpulse':
-    case 'activity':
       return <HeartPulse className={className} />;
+    case 'alerttriangle':
+    case 'shieldalert':
+    case 'zap':
+      return <AlertTriangle className={className} />;
+    case 'footprints':
+    case 'flame':
+      return <Footprints className={className} />;
+    case 'activity':
+      return <Activity className={className} />;
     case 'database':
       return <Database className={className} />;
     case 'globe':

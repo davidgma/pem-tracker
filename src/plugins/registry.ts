@@ -19,6 +19,8 @@ import { dropboxService } from '../services/dropbox.service';
 import { helloWorldPlugin } from './hello-world';
 import { sqlConsolePlugin } from './sql-console';
 import { pacingTrackerPlugin } from './pacing-tracker';
+import { pemLoggerPlugin } from './pem-logger';
+import { activityLoggerPlugin } from './activity-logger';
 import { dropboxSyncPlugin } from './dropbox-sync';
 
 export class PluginRegistry {
@@ -51,6 +53,8 @@ export class PluginRegistry {
     // 1. Register built-in plugins first
     const builtins: Plugin[] = [
       pacingTrackerPlugin,
+      pemLoggerPlugin,
+      activityLoggerPlugin,
       sqlConsolePlugin,
       helloWorldPlugin,
       dropboxSyncPlugin,

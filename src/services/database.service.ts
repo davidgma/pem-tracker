@@ -184,10 +184,14 @@ export class DatabaseService {
       );
     `);
 
-    // Ensure default update_frequency setting (120 seconds default = 2 minutes)
+    // Ensure default settings (update_frequency and default_activity_duration)
     this.db.run(`
       INSERT OR IGNORE INTO t_settings (setting_name, setting_value)
       VALUES ('update_frequency', '120');
+    `);
+    this.db.run(`
+      INSERT OR IGNORE INTO t_settings (setting_name, setting_value)
+      VALUES ('default_activity_duration', '60');
     `);
 
     this.ensurePresetQueriesSeeded();
@@ -873,6 +877,31 @@ export class DatabaseService {
     }
   }
 
+  public async updatePEM(pem: PEMRecord): Promise<void> {
+    const nowIso = new Date().toISOString();
+    await this.run(
+      `UPDATE t_pems SET
+        pem_date = ?,
+        headache = ?,
+        fatigue = ?,
+        eye_stinging = ?,
+        general_malaise = ?,
+        brain_fog = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        pem.pem_date,
+        pem.headache,
+        pem.fatigue,
+        pem.eye_stinging,
+        pem.general_malaise,
+        pem.brain_fog,
+        nowIso,
+        pem.id,
+      ]
+    );
+  }
+
   public async insertActivity(act: Omit<ActivityRecord, 'id'>): Promise<void> {
     const uuid = act.client_uuid || ('act_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9));
     const nowIso = act.updated_at || new Date().toISOString();
@@ -903,6 +932,45 @@ export class DatabaseService {
         act.end_peak,
         uuid,
         nowIso,
+      ]
+    );
+  }
+
+  public async updateActivity(act: ActivityRecord): Promise<void> {
+    const nowIso = new Date().toISOString();
+    await this.run(
+      `UPDATE t_activities SET
+        activity_date = ?,
+        activity_name = ?,
+        duration = ?,
+        start_steps = ?,
+        end_steps = ?,
+        start_calories = ?,
+        end_calories = ?,
+        start_moderate = ?,
+        end_moderate = ?,
+        start_vigorous = ?,
+        end_vigorous = ?,
+        start_peak = ?,
+        end_peak = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        act.activity_date,
+        act.activity_name,
+        act.duration,
+        act.start_steps,
+        act.end_steps,
+        act.start_calories,
+        act.end_calories,
+        act.start_moderate,
+        act.end_moderate,
+        act.start_vigorous,
+        act.end_vigorous,
+        act.start_peak,
+        act.end_peak,
+        nowIso,
+        act.id,
       ]
     );
   }
