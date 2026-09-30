@@ -33,6 +33,10 @@ const DropboxSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
   const [config, setConfig] = useState(context.dropbox.getConfig());
   const [user, setUser] = useState<DropboxUser | null>(context.dropbox.getCurrentUser());
   const [lastSynced, setLastSynced] = useState<Date | null>(context.dropbox.getLastSynced());
+  const [syncStatus, setSyncStatus] = useState<string>(context.dropbox.getSyncStatus());
+  const [syncFrequency, setSyncFrequency] = useState<number>(context.dropbox.getSyncInterval() || 120);
+  const [customFreqInput, setCustomFreqInput] = useState<string>('');
+  const [freqSaved, setFreqSaved] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [manualToken, setManualToken] = useState('');
   const [dbSize, setDbSize] = useState<number>(0);
@@ -52,7 +56,19 @@ const DropboxSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
 
   useEffect(() => {
     refreshDbSize();
-    const unsubStatus = context.dropbox.onStatusChange(() => {
+
+    // Load update_frequency setting from t_settings table
+    context.database.getSetting('update_frequency', '120').then((val) => {
+      if (val) {
+        const parsed = parseInt(val, 10);
+        if (!isNaN(parsed) && parsed >= 15) {
+          setSyncFrequency(parsed);
+        }
+      }
+    });
+
+    const unsubStatus = context.dropbox.onStatusChange((status) => {
+      setSyncStatus(status);
       setUser(context.dropbox.getCurrentUser());
       setLastSynced(context.dropbox.getLastSynced());
       setSyncLogs(context.dropbox.getSyncLogs());
@@ -67,6 +83,19 @@ const DropboxSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
       unsubHistory();
     };
   }, [context]);
+
+  const handleUpdateFrequency = async (seconds: number) => {
+    if (isNaN(seconds) || seconds < 15) return;
+    setSyncFrequency(seconds);
+    await context.dropbox.setSyncInterval(seconds);
+    setFreqSaved(true);
+    setTimeout(() => setFreqSaved(false), 2500);
+    context.showNotification(
+      'Sync Frequency Updated',
+      `Auto-sync frequency set to ${seconds}s (saved to t_settings)`,
+      'success'
+    );
+  };
 
   const handleUpdateConfig = (updates: Partial<typeof config>) => {
     const updated = { ...config, ...updates };
@@ -231,7 +260,42 @@ const DropboxSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
         </div>
 
         {isAuthenticated && (
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 'Dropbox synced' output indicator moved from top row */}
+            <div
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[38px] shadow-xs ${
+                isSyncing || syncStatus === 'syncing'
+                  ? 'bg-blue-50 border-blue-200 text-blue-800'
+                  : syncStatus === 'conflict'
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : syncStatus === 'error'
+                  ? 'bg-rose-50 border-rose-200 text-rose-800'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              }`}
+              title={`Status: ${syncStatus.toUpperCase()}`}
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 ${
+                  isSyncing || syncStatus === 'syncing'
+                    ? 'animate-spin text-blue-600'
+                    : syncStatus === 'conflict'
+                    ? 'text-amber-600'
+                    : syncStatus === 'error'
+                    ? 'text-rose-600'
+                    : 'text-emerald-600'
+                }`}
+              />
+              <span>
+                {isSyncing || syncStatus === 'syncing'
+                  ? 'Syncing...'
+                  : syncStatus === 'conflict'
+                  ? 'Conflict Resolved'
+                  : syncStatus === 'error'
+                  ? 'Sync Error'
+                  : 'Dropbox Synced'}
+              </span>
+            </div>
+
             <button
               onClick={handleSyncNow}
               disabled={isSyncing}
@@ -449,6 +513,85 @@ const DropboxSyncView: React.FC<{ context: PluginContext }> = ({ context }) => {
                 onChange={(e) => handleUpdateConfig({ appKey: e.target.value.trim() })}
                 className="bg-white border border-slate-300 rounded px-2 py-1 font-mono text-[11px] text-slate-800 w-44"
               />
+            </div>
+          </div>
+
+          {/* Auto-Sync Frequency Setting (stored in t_settings) */}
+          <div className="pt-3 border-t border-slate-100 space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Auto-Sync Frequency (stored in database table <code className="font-mono text-blue-700 bg-blue-50 px-1 py-0.5 rounded border border-blue-200">t_settings</code>):</span>
+                </label>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Periodic synchronization interval. Default: 120 seconds (2 minutes).
+                </p>
+              </div>
+
+              {freqSaved && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  <Check className="w-3 h-3 text-emerald-600" /> Saved to t_settings
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {[
+                { label: '30s', val: 30 },
+                { label: '60s (1 min)', val: 60 },
+                { label: '120s (2 mins — Default)', val: 120 },
+                { label: '300s (5 mins)', val: 300 },
+                { label: '600s (10 mins)', val: 600 },
+              ].map((opt) => (
+                <button
+                  key={opt.val}
+                  type="button"
+                  onClick={() => handleUpdateFrequency(opt.val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    syncFrequency === opt.val
+                      ? 'bg-blue-50 border-blue-400 text-blue-800 font-semibold ring-1 ring-blue-400 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+
+              <div className="flex items-center gap-1.5 ml-auto sm:ml-2">
+                <span className="text-[11px] text-slate-500">Custom:</span>
+                <input
+                  type="number"
+                  min="15"
+                  max="3600"
+                  value={customFreqInput}
+                  onChange={(e) => setCustomFreqInput(e.target.value)}
+                  placeholder={`${syncFrequency}s`}
+                  className="w-20 bg-white border border-slate-300 rounded px-2 py-1 text-xs font-mono text-slate-800 text-right"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const parsed = parseInt(customFreqInput, 10);
+                    if (!isNaN(parsed) && parsed >= 15) {
+                      handleUpdateFrequency(parsed);
+                      setCustomFreqInput('');
+                    }
+                  }}
+                  disabled={!customFreqInput || isNaN(parseInt(customFreqInput, 10))}
+                  className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-40 text-xs font-medium border border-slate-300 transition-colors"
+                >
+                  Set
+                </button>
+                <span className="text-[11px] text-slate-500">sec</span>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-0.5">
+              <span>Database configuration:</span>
+              <code className="font-mono text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                t_settings: update_frequency = {syncFrequency}
+              </code>
             </div>
           </div>
         </div>

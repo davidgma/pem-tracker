@@ -52,3 +52,19 @@ export interface QueryExecutionResult {
 }
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'merging' | 'offline' | 'error' | 'conflict';
+
+export interface SettingRecord {
+  id: number;
+  setting_name: string;
+  setting_value: string;
+}
+
+export interface SqlQueryRecord {
+  id: number;
+  name: string;
+  description?: string;
+  sql_text: string;
+  category?: string;
+  created_at?: string;
+  updated_at?: string;
+}

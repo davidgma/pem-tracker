@@ -23,7 +23,6 @@ import {
   Layers,
 } from 'lucide-react';
 import { PluginNavItem, PluginMenuItem, AppNotification } from './plugins/plugin.types';
-import { SyncStatus } from './types/database.types';
 
 // Icon resolver for dynamic plugin items
 const renderIcon = (name: string, className = 'w-4 h-4') => {
@@ -50,8 +49,6 @@ export default function App() {
   const [activeViewId, setActiveViewId] = useState<string>('dashboard');
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('offline');
-  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     async function boot() {
@@ -89,14 +86,8 @@ export default function App() {
       setNotifications([...pluginRegistry.getNotifications()]);
     });
 
-    // Subscribe to Dropbox sync status
-    const unsubSync = dropboxService.onStatusChange((status) => {
-      setSyncStatus(status);
-    });
-
     return () => {
       unsubRegistry();
-      unsubSync();
     };
   }, []);
 
@@ -104,26 +95,6 @@ export default function App() {
     pluginRegistry.setActiveView(viewId);
     setActiveViewId(viewId);
     setIsMenuOpen(false);
-  };
-
-  const handleManualSync = async () => {
-    if (!dropboxService.isAuthenticated()) {
-      handleNavClick('dropbox-sync');
-      return;
-    }
-    setIsSyncing(true);
-    try {
-      await dropboxService.syncWithDropbox();
-      pluginRegistry.addNotification(
-        'Database Synchronized',
-        'SQLite database updated to Dropbox drive successfully',
-        'success'
-      );
-    } catch (e: any) {
-      pluginRegistry.addNotification('Sync Error', e.message || 'Sync failed', 'error');
-    } finally {
-      setIsSyncing(false);
-    }
   };
 
   // Find active view component with automatic fallback to dashboard
@@ -205,48 +176,8 @@ export default function App() {
             })}
           </nav>
 
-          {/* Zone 3: 1–2 primary actions + menu */}
+          {/* Zone 3: Menu & secondary navigation */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Dropbox Sync quick status button */}
-            <button
-              onClick={handleManualSync}
-              title={
-                dropboxService.isAuthenticated()
-                  ? `Dropbox: ${syncStatus.toUpperCase()} (Click to check/sync)`
-                  : 'Dropbox: Local Mode (Click to connect)'
-              }
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap min-h-[40px] shadow-xs ${
-                dropboxService.isAuthenticated()
-                  ? syncStatus === 'pending'
-                    ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
-                    : syncStatus === 'merging'
-                    ? 'bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100'
-                    : 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100'
-                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              <RefreshCw
-                className={`w-3.5 h-3.5 ${
-                  isSyncing || syncStatus === 'syncing' || syncStatus === 'merging'
-                    ? 'animate-spin text-blue-600'
-                    : syncStatus === 'pending'
-                    ? 'text-amber-600'
-                    : 'text-blue-600'
-                }`}
-              />
-              <span className="hidden sm:inline">
-                {dropboxService.isAuthenticated()
-                  ? syncStatus === 'pending'
-                    ? 'Auto-Pushing...'
-                    : syncStatus === 'merging'
-                    ? 'Merging Devices...'
-                    : syncStatus === 'syncing'
-                    ? 'Syncing...'
-                    : 'Dropbox Synced'
-                  : 'Local SQLite'}
-              </span>
-            </button>
-
             {/* Main Menu Dropdown */}
             <div className="relative">
               <button

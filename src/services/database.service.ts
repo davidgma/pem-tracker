@@ -7,7 +7,7 @@ import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { get, set } from 'idb-keyval';
 import { AsyncMutex } from './mutex';
-import { ActivityRecord, PEMRecord, QueryExecutionResult } from '../types/database.types';
+import { ActivityRecord, PEMRecord, QueryExecutionResult, SettingRecord, SqlQueryRecord } from '../types/database.types';
 
 const IDB_KEY_SQLITE_DATA = 'pem_sqlite_database_bin';
 const IDB_KEY_UPDATED_AT = 'pem_sqlite_updated_at';
@@ -163,6 +163,34 @@ export class DatabaseService {
         entity_type TEXT NOT NULL
       );
     `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS t_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        setting_name TEXT UNIQUE,
+        setting_value TEXT
+      );
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS t_sql_queries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        sql_text TEXT NOT NULL,
+        category TEXT DEFAULT 'General',
+        created_at TEXT,
+        updated_at TEXT
+      );
+    `);
+
+    // Ensure default update_frequency setting (120 seconds default = 2 minutes)
+    this.db.run(`
+      INSERT OR IGNORE INTO t_settings (setting_name, setting_value)
+      VALUES ('update_frequency', '120');
+    `);
+
+    this.ensurePresetQueriesSeeded();
 
     // Migration safety: Ensure client_uuid and updated_at exist in older tables
     try {
@@ -409,7 +437,7 @@ export class DatabaseService {
       ];
 
       // Export schema and data for tables
-      const tables = ['t_pems', 't_activities', 't_tombstones'];
+      const tables = ['t_pems', 't_activities', 't_settings', 't_sql_queries', 't_tombstones'];
       for (const table of tables) {
         // Table schema
         const schemaRes = this.db.exec(
@@ -891,6 +919,215 @@ export class DatabaseService {
         [uuid, new Date().toISOString(), 'activity']
       );
     }
+  }
+
+  private ensurePresetQueriesSeeded(): void {
+    if (!this.db) return;
+    try {
+      const qRes = this.db.exec('SELECT COUNT(*) FROM t_sql_queries');
+      const count = qRes[0]?.values[0]?.[0] || 0;
+      if (count === 0) {
+        this.seedPresetQueries();
+      }
+    } catch (e) {
+      console.warn('Failed to inspect t_sql_queries:', e);
+    }
+  }
+
+  private seedPresetQueries(): void {
+    if (!this.db) return;
+    const nowIso = new Date().toISOString();
+    const defaults = [
+      {
+        name: 'Recent PEM Episodes',
+        category: 'PEM Tracking',
+        description: 'Shows the 15 most recent symptom severity entries (0-10 scale)',
+        sql: 'SELECT id, pem_date, headache, fatigue, eye_stinging, general_malaise, brain_fog FROM t_pems ORDER BY pem_date DESC LIMIT 15;',
+      },
+      {
+        name: 'Recent Daily Activities',
+        category: 'Activities',
+        description: 'Shows the 15 most recent recorded exertion sessions with computed steps and minutes',
+        sql: 'SELECT id, activity_date, activity_name, duration, (end_steps - start_steps) AS delta_steps, (end_calories - start_calories) AS delta_cals, (end_moderate - start_moderate) AS mod_mins, (end_vigorous - start_vigorous) AS vig_mins, (end_peak - start_peak) AS peak_mins FROM t_activities ORDER BY activity_date DESC LIMIT 15;',
+      },
+      {
+        name: 'Daily Energy Rollup',
+        category: 'Rollups',
+        description: 'Aggregates daily steps, calories, and active intensity minutes by date',
+        sql: `SELECT 
+  date(activity_date) AS log_date,
+  COUNT(*) AS activity_count,
+  ROUND(SUM(duration), 1) AS total_duration_mins,
+  ROUND(SUM(end_steps - start_steps), 0) AS total_steps,
+  ROUND(SUM(end_calories - start_calories), 0) AS total_calories,
+  ROUND(SUM(end_moderate - start_moderate), 1) AS mod_mins,
+  ROUND(SUM(end_vigorous - start_vigorous), 1) AS vig_mins,
+  ROUND(SUM(end_peak - start_peak), 1) AS peak_mins
+FROM t_activities 
+GROUP BY date(activity_date) 
+ORDER BY log_date DESC;`,
+      },
+      {
+        name: 'Exertion vs PEM Crash Lag',
+        category: 'Analysis',
+        description: 'Correlates high-exertion days with subsequent next-day PEM crash symptoms',
+        sql: `SELECT 
+  a.activity_day,
+  a.total_steps,
+  a.total_calories,
+  p.pem_day,
+  ROUND(p.avg_fatigue, 1) AS next_day_fatigue,
+  ROUND(p.avg_malaise, 1) AS next_day_malaise
+FROM (
+  SELECT date(activity_date) AS activity_day, 
+         SUM(end_steps - start_steps) AS total_steps, 
+         SUM(end_calories - start_calories) AS total_calories 
+  FROM t_activities 
+  GROUP BY date(activity_date)
+) a
+LEFT JOIN (
+  SELECT date(pem_date) AS pem_day, 
+         AVG(fatigue) AS avg_fatigue, 
+         AVG(general_malaise) AS avg_malaise 
+  FROM t_pems 
+  GROUP BY date(pem_date)
+) p ON date(a.activity_day, '+1 day') = p.pem_day
+ORDER BY a.activity_day DESC;`,
+      },
+      {
+        name: 'Schema: t_pems',
+        category: 'Schema',
+        description: 'Columns and types for the PEM symptoms table',
+        sql: 'PRAGMA table_info(t_pems);',
+      },
+      {
+        name: 'Schema: t_activities',
+        category: 'Schema',
+        description: 'Columns and types for the activities table',
+        sql: 'PRAGMA table_info(t_activities);',
+      },
+      {
+        name: 'Schema: t_settings',
+        category: 'Schema',
+        description: 'Columns and types for the system settings table',
+        sql: 'PRAGMA table_info(t_settings);',
+      },
+      {
+        name: 'Schema: t_sql_queries',
+        category: 'Schema',
+        description: 'Columns and types for the saved SQL queries table',
+        sql: 'PRAGMA table_info(t_sql_queries);',
+      },
+      {
+        name: 'System Settings (t_settings)',
+        category: 'Settings',
+        description: 'Current configuration settings including update_frequency',
+        sql: 'SELECT id, setting_name, setting_value FROM t_settings ORDER BY id ASC;',
+      },
+      {
+        name: 'All Saved Queries (t_sql_queries)',
+        category: 'Settings',
+        description: 'Lists all stored queries in t_sql_queries',
+        sql: 'SELECT id, name, category, description, sql_text, updated_at FROM t_sql_queries ORDER BY category, name;',
+      },
+    ];
+
+    for (const d of defaults) {
+      this.db.run(
+        `INSERT INTO t_sql_queries (name, description, sql_text, category, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [d.name, d.description, d.sql, d.category, nowIso, nowIso]
+      );
+    }
+  }
+
+  // Settings operations
+  public async getSetting(name: string, defaultValue?: string): Promise<string | null> {
+    await this.initialize();
+    const rows = await this.query<{ setting_value: string }>(
+      'SELECT setting_value FROM t_settings WHERE setting_name = ?',
+      [name]
+    );
+    if (rows.length > 0) {
+      return rows[0].setting_value;
+    }
+    return defaultValue ?? null;
+  }
+
+  public async setSetting(name: string, value: string): Promise<void> {
+    await this.initialize();
+    await this.run(
+      `INSERT INTO t_settings (setting_name, setting_value)
+       VALUES (?, ?)
+       ON CONFLICT(setting_name) DO UPDATE SET setting_value = excluded.setting_value`,
+      [name, value]
+    );
+  }
+
+  public async getAllSettings(): Promise<SettingRecord[]> {
+    await this.initialize();
+    return this.query<SettingRecord>('SELECT id, setting_name, setting_value FROM t_settings ORDER BY id ASC');
+  }
+
+  // SQL Queries operations
+  public async getSavedQueries(): Promise<SqlQueryRecord[]> {
+    await this.initialize();
+    return this.query<SqlQueryRecord>(
+      'SELECT id, name, description, sql_text, category, created_at, updated_at FROM t_sql_queries ORDER BY category ASC, name ASC'
+    );
+  }
+
+  public async saveQuery(query: {
+    id?: number;
+    name: string;
+    description?: string;
+    sql_text: string;
+    category?: string;
+  }): Promise<number> {
+    await this.initialize();
+    const nowIso = new Date().toISOString();
+    if (query.id) {
+      await this.run(
+        `UPDATE t_sql_queries SET name = ?, description = ?, sql_text = ?, category = ?, updated_at = ? WHERE id = ?`,
+        [
+          query.name,
+          query.description || '',
+          query.sql_text,
+          query.category || 'General',
+          nowIso,
+          query.id,
+        ]
+      );
+      return query.id;
+    } else {
+      await this.run(
+        `INSERT INTO t_sql_queries (name, description, sql_text, category, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          query.name,
+          query.description || '',
+          query.sql_text,
+          query.category || 'General',
+          nowIso,
+          nowIso,
+        ]
+      );
+      const res = await this.query<{ id: number }>('SELECT last_insert_rowid() AS id');
+      return res[0]?.id || 0;
+    }
+  }
+
+  public async deleteQuery(id: number): Promise<void> {
+    await this.initialize();
+    await this.run('DELETE FROM t_sql_queries WHERE id = ?', [id]);
+  }
+
+  public async resetDefaultQueries(): Promise<void> {
+    await this.initialize();
+    await this.run('DELETE FROM t_sql_queries');
+    this.seedPresetQueries();
+    await this.persistToLocalCache();
+    this.notifyChange();
   }
 }
 

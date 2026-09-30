@@ -58,7 +58,7 @@ export class DropboxService {
     appKey: DEFAULT_APP_KEY,
     syncFormat: 'sqlite',
     autoSync: true,
-    syncIntervalSeconds: 60,
+    syncIntervalSeconds: 120,
   };
 
   private constructor() {
@@ -136,35 +136,89 @@ export class DropboxService {
   }
 
   /**
-   * Listen to database changes and auto-push to Dropbox
+   * Listen to database changes and auto-push to Dropbox respecting configured frequency
    */
   private listenToDatabaseChanges(): void {
     dbService.addChangeListener(() => {
       if (!this.isAuthenticated() || !this.config.autoSync) return;
 
-      if (this.autoPushTimer) clearTimeout(this.autoPushTimer);
+      // Rate limit auto-push to honor configured frequency (default 120s)
+      if (this.autoPushTimer) return;
+      const intervalSec = this.config.syncIntervalSeconds || 120;
       this.autoPushTimer = setTimeout(async () => {
+        this.autoPushTimer = null;
         try {
-          this.logSync('info', 'Auto-sync Triggered', 'Pushing local changes to Dropbox...');
-          await this.syncWithDropbox();
+          if (this.isAuthenticated() && dbService.isDirty()) {
+            this.logSync('info', 'Auto-sync Triggered', `Pushing changes (${intervalSec}s frequency)...`);
+            await this.syncWithDropbox();
+          }
         } catch (e: any) {
           console.error('Auto-push to Dropbox failed:', e);
           this.logSync('error', 'Auto-sync Failed', e.message);
         }
-      }, 4000);
+      }, intervalSec * 1000);
     });
   }
 
   private startBackgroundMonitor(): void {
     if (this.pollIntervalTimer) clearInterval(this.pollIntervalTimer);
-    const intervalMs = Math.max(30, this.config.syncIntervalSeconds) * 1000;
-    this.pollIntervalTimer = setInterval(() => {
-      if (this.isAuthenticated() && !dbService.isDirty()) {
-        this.checkRemoteAndReconcile('background_poll').catch((e) => {
+    const intervalMs = Math.max(15, this.config.syncIntervalSeconds || 120) * 1000;
+    this.pollIntervalTimer = setInterval(async () => {
+      if (this.isAuthenticated()) {
+        try {
+          if (dbService.isDirty()) {
+            this.logSync('info', 'Periodic Auto-sync', 'Pushing local changes to Dropbox...');
+            await this.syncWithDropbox();
+          } else {
+            await this.checkRemoteAndReconcile('background_poll');
+          }
+        } catch (e: any) {
           console.warn('Dropbox background check notice:', e.message);
-        });
+        }
       }
     }, intervalMs);
+  }
+
+  public async loadSettingsFromDb(): Promise<void> {
+    try {
+      const val = await dbService.getSetting('update_frequency', '120');
+      if (val) {
+        const parsed = parseInt(val, 10);
+        if (!isNaN(parsed) && parsed >= 15) {
+          this.config.syncIntervalSeconds = parsed;
+          this.saveConfig();
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load update_frequency from t_settings:', e);
+    }
+  }
+
+  public async setSyncInterval(seconds: number): Promise<void> {
+    const val = Math.max(15, seconds);
+    this.config.syncIntervalSeconds = val;
+    this.saveConfig();
+    try {
+      await dbService.setSetting('update_frequency', String(val));
+    } catch (e) {
+      console.warn('Failed to save update_frequency to t_settings:', e);
+    }
+    if (this.isAuthenticated()) {
+      this.startBackgroundMonitor();
+    }
+    this.statusListeners.forEach((l) => l(this.syncStatus));
+  }
+
+  public getSyncInterval(): number {
+    return this.config.syncIntervalSeconds || 120;
+  }
+
+  private saveConfig(): void {
+    try {
+      localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(this.config));
+    } catch (e) {
+      console.error('Failed to save Dropbox config:', e);
+    }
   }
 
   // Helper: Generates random PKCE code verifier and challenge
@@ -638,9 +692,11 @@ export class DropboxService {
    * Startup sync handler called on page load/refresh
    */
   public async initializeStartupSync(): Promise<void> {
+    await this.loadSettingsFromDb();
     if (!this.accessToken) return;
     try {
       await this.checkRemoteAndReconcile('page_startup');
+      this.startBackgroundMonitor();
     } catch (err: any) {
       console.warn('Initial Dropbox reconciliation notice:', err.message);
     }

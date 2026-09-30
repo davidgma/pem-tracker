@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plugin, PluginContext } from '../plugin.types';
-import { QueryExecutionResult } from '../../types/database.types';
+import { QueryExecutionResult, SqlQueryRecord } from '../../types/database.types';
 import {
   Database,
   Play,
@@ -18,66 +18,16 @@ import {
   Clock,
   Code2,
   Sparkles,
+  Plus,
+  Pencil,
+  Trash2,
+  Save,
+  Tag,
+  X,
+  RotateCw,
+  FolderOpen,
+  Bookmark,
 } from 'lucide-react';
-
-const PRESET_QUERIES = [
-  {
-    name: 'Recent PEM Episodes',
-    sql: 'SELECT id, pem_date, headache, fatigue, eye_stinging, general_malaise, brain_fog FROM t_pems ORDER BY pem_date DESC LIMIT 15;',
-  },
-  {
-    name: 'Recent Daily Activities',
-    sql: 'SELECT id, activity_date, activity_name, duration, (end_steps - start_steps) AS delta_steps, (end_calories - start_calories) AS delta_cals, (end_moderate - start_moderate) AS mod_mins, (end_vigorous - start_vigorous) AS vig_mins, (end_peak - start_peak) AS peak_mins FROM t_activities ORDER BY activity_date DESC LIMIT 15;',
-  },
-  {
-    name: 'Daily Energy Rollup',
-    sql: `SELECT 
-  date(activity_date) AS log_date,
-  COUNT(*) AS activity_count,
-  ROUND(SUM(duration), 1) AS total_duration_mins,
-  ROUND(SUM(end_steps - start_steps), 0) AS total_steps,
-  ROUND(SUM(end_calories - start_calories), 0) AS total_calories,
-  ROUND(SUM(end_moderate - start_moderate), 1) AS mod_mins,
-  ROUND(SUM(end_vigorous - start_vigorous), 1) AS vig_mins,
-  ROUND(SUM(end_peak - start_peak), 1) AS peak_mins
-FROM t_activities 
-GROUP BY date(activity_date) 
-ORDER BY log_date DESC;`,
-  },
-  {
-    name: 'Exertion vs PEM Crash Lag',
-    sql: `SELECT 
-  a.activity_day,
-  a.total_steps,
-  a.total_calories,
-  p.pem_day,
-  ROUND(p.avg_fatigue, 1) AS next_day_fatigue,
-  ROUND(p.avg_malaise, 1) AS next_day_malaise
-FROM (
-  SELECT date(activity_date) AS activity_day, 
-         SUM(end_steps - start_steps) AS total_steps, 
-         SUM(end_calories - start_calories) AS total_calories 
-  FROM t_activities 
-  GROUP BY date(activity_date)
-) a
-LEFT JOIN (
-  SELECT date(pem_date) AS pem_day, 
-         AVG(fatigue) AS avg_fatigue, 
-         AVG(general_malaise) AS avg_malaise 
-  FROM t_pems 
-  GROUP BY date(pem_date)
-) p ON date(a.activity_day, '+1 day') = p.pem_day
-ORDER BY a.activity_day DESC;`,
-  },
-  {
-    name: 'Schema: t_pems',
-    sql: 'PRAGMA table_info(t_pems);',
-  },
-  {
-    name: 'Schema: t_activities',
-    sql: 'PRAGMA table_info(t_activities);',
-  },
-];
 
 const SQL_KEYWORDS = new Set([
   'SELECT', 'FROM', 'WHERE', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE',
@@ -236,11 +186,29 @@ const SqlSyntaxEditor: React.FC<{
 };
 
 const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
-  const [sql, setSql] = useState<string>(PRESET_QUERIES[0].sql);
+  const [savedQueries, setSavedQueries] = useState<SqlQueryRecord[]>([]);
+  const [selectedQueryId, setSelectedQueryId] = useState<number | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [sql, setSql] = useState<string>(
+    'SELECT id, pem_date, headache, fatigue, eye_stinging, general_malaise, brain_fog FROM t_pems ORDER BY pem_date DESC LIMIT 15;'
+  );
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [modalForm, setModalForm] = useState<{
+    id?: number;
+    name: string;
+    description: string;
+    category: string;
+    sql_text: string;
+  }>({
+    name: '',
+    description: '',
+    category: 'Custom',
+    sql_text: '',
+  });
   const [tableStats, setTableStats] = useState<{ pems: number; activities: number }>({
     pems: 0,
     activities: 0,
@@ -256,10 +224,128 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
     }
   };
 
+  const loadQueries = async (autoSelectFirst = false) => {
+    try {
+      const list = await context.database.getSavedQueries();
+      setSavedQueries(list);
+      if (autoSelectFirst && list.length > 0) {
+        setSelectedQueryId(list[0].id);
+        setSql(list[0].sql_text);
+        handleRunQuery(list[0].sql_text);
+      }
+    } catch (e) {
+      console.error('Failed to load queries from t_sql_queries:', e);
+    }
+  };
+
   useEffect(() => {
     refreshTableStats();
-    handleRunQuery(PRESET_QUERIES[0].sql);
+    loadQueries(true);
   }, []);
+
+  const handleSelectQuery = (q: SqlQueryRecord) => {
+    setSelectedQueryId(q.id);
+    setSql(q.sql_text);
+    handleRunQuery(q.sql_text);
+  };
+
+  const handleOpenCreateModal = () => {
+    setModalForm({
+      id: undefined,
+      name: '',
+      description: '',
+      category: activeCategory !== 'All' ? activeCategory : 'Custom',
+      sql_text: sql || '',
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (q: SqlQueryRecord, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setModalForm({
+      id: q.id,
+      name: q.name,
+      description: q.description || '',
+      category: q.category || 'General',
+      sql_text: q.sql_text,
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleSaveModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!modalForm.name.trim() || !modalForm.sql_text.trim()) {
+      context.showNotification('Validation Error', 'Query name and SQL text are required', 'warning');
+      return;
+    }
+
+    try {
+      const savedId = await context.database.saveQuery({
+        id: modalForm.id,
+        name: modalForm.name.trim(),
+        description: modalForm.description.trim(),
+        category: modalForm.category.trim() || 'Custom',
+        sql_text: modalForm.sql_text.trim(),
+      });
+
+      await loadQueries();
+      setSelectedQueryId(savedId);
+      setIsModalOpen(false);
+      context.showNotification(
+        modalForm.id ? 'Query Updated' : 'Query Created',
+        `Successfully maintained in t_sql_queries table`,
+        'success'
+      );
+    } catch (err: any) {
+      context.showNotification('Save Error', err.message || 'Failed to save query', 'error');
+    }
+  };
+
+  const handleDeleteQuery = async (q: SqlQueryRecord, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm(`Delete query "${q.name}" from t_sql_queries?`)) return;
+
+    try {
+      await context.database.deleteQuery(q.id);
+      await loadQueries();
+      if (selectedQueryId === q.id) {
+        setSelectedQueryId(null);
+      }
+      context.showNotification('Query Deleted', `Removed "${q.name}" from t_sql_queries`, 'info');
+    } catch (err: any) {
+      context.showNotification('Delete Error', err.message || 'Failed to delete query', 'error');
+    }
+  };
+
+  const handleResetDefaults = async () => {
+    if (
+      !confirm(
+        'Reset all queries in t_sql_queries to preset defaults? Custom queries will be replaced with defaults.'
+      )
+    )
+      return;
+
+    try {
+      await context.database.resetDefaultQueries();
+      await loadQueries(true);
+      context.showNotification('Presets Restored', 'Reset t_sql_queries to initial preset queries', 'success');
+    } catch (err: any) {
+      context.showNotification('Reset Error', err.message || 'Failed to reset queries', 'error');
+    }
+  };
+
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    savedQueries.forEach((q) => {
+      if (q.category) cats.add(q.category);
+    });
+    return ['All', ...Array.from(cats)];
+  }, [savedQueries]);
+
+  const filteredQueries = useMemo(() => {
+    if (activeCategory === 'All') return savedQueries;
+    return savedQueries.filter((q) => q.category === activeCategory);
+  }, [savedQueries, activeCategory]);
 
   const handleRunQuery = async (queryToRun?: string) => {
     const targetSql = (queryToRun || sql).trim();
@@ -357,28 +443,114 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
         </div>
       </div>
 
-      {/* Preset Queries Row */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-            <Code2 className="w-3.5 h-3.5 text-teal-600" />
-            <span>Preset Analytical Queries</span>
-          </span>
-          <span className="text-[11px] text-slate-400">Click to load</span>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {PRESET_QUERIES.map((preset, idx) => (
+      {/* Saved & Preset Queries from t_sql_queries */}
+      <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Code2 className="w-4 h-4 text-teal-600" />
+            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Saved Queries (<code className="font-mono text-teal-700 bg-teal-50 px-1 py-0.5 rounded border border-teal-200 lowercase">t_sql_queries</code>)
+            </span>
+            <span className="text-[11px] font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+              {savedQueries.length}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
             <button
-              key={idx}
-              onClick={() => {
-                setSql(preset.sql);
-                handleRunQuery(preset.sql);
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-sm"
+              onClick={handleOpenCreateModal}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium text-xs transition-colors shadow-xs"
+              title="Save new query into t_sql_queries"
             >
-              {preset.name}
+              <Plus className="w-3.5 h-3.5" />
+              <span>New Query</span>
             </button>
-          ))}
+
+            <button
+              onClick={handleResetDefaults}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 text-xs font-medium transition-colors"
+              title="Reset t_sql_queries table to preset defaults"
+            >
+              <RotateCw className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">Reset Presets</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Category Filter Tabs */}
+        {categories.length > 2 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-100">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  activeCategory === cat
+                    ? 'bg-teal-50 text-teal-800 border border-teal-200 font-semibold shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100 border border-transparent'
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Queries Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+          {filteredQueries.map((q) => {
+            const isSelected = selectedQueryId === q.id;
+            return (
+              <div
+                key={q.id}
+                onClick={() => handleSelectQuery(q)}
+                className={`group relative flex flex-col justify-between p-3 rounded-lg border text-left cursor-pointer transition-all ${
+                  isSelected
+                    ? 'bg-teal-50/70 border-teal-400 ring-1 ring-teal-400 shadow-xs'
+                    : 'bg-white hover:bg-slate-50 border-slate-200'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="font-semibold text-xs text-slate-900 group-hover:text-teal-700 transition-colors truncate">
+                      {q.name}
+                    </span>
+                    {q.category && (
+                      <span className="shrink-0 text-[10px] font-medium text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                        {q.category}
+                      </span>
+                    )}
+                  </div>
+                  {q.description && (
+                    <p className="text-[11px] text-slate-500 mt-1 line-clamp-1">{q.description}</p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-100 text-[11px]">
+                  <span className="font-mono text-slate-400 truncate max-w-[150px]">
+                    {q.sql_text.replace(/\s+/g, ' ').substring(0, 32)}...
+                  </span>
+
+                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={(e) => handleOpenEditModal(q, e)}
+                      className="p-1.5 rounded text-slate-400 hover:text-teal-700 hover:bg-teal-50 transition-colors"
+                      title="Edit query in t_sql_queries"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={(e) => handleDeleteQuery(q, e)}
+                      className="p-1.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                      title="Delete from t_sql_queries"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -424,8 +596,19 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
             <button
               onClick={() => setSql('')}
               className="px-3.5 py-2.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shadow-sm min-h-[42px]"
+              title="Clear editor"
             >
               <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={handleOpenCreateModal}
+              disabled={!sql.trim()}
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors shadow-sm min-h-[42px]"
+              title="Save current SQL to t_sql_queries table"
+            >
+              <Save className="w-3.5 h-3.5 text-teal-600" />
+              <span>Save Query</span>
             </button>
           </div>
 
@@ -551,6 +734,108 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
               Statement executed successfully with no result set.
             </div>
           )}
+        </div>
+      )}
+
+      {/* Create / Edit Query Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-2xl w-full max-w-xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-teal-600" />
+                <h3 className="font-bold text-sm text-slate-900">
+                  {modalForm.id ? 'Edit Query in t_sql_queries' : 'Save Query to t_sql_queries'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveModal} className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Query Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Weekly Step Averages"
+                  value={modalForm.name}
+                  onChange={(e) => setModalForm({ ...modalForm, name: e.target.value })}
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Category
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Analysis, Activities, PEM Tracking"
+                    value={modalForm.category}
+                    onChange={(e) => setModalForm({ ...modalForm, category: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Description (optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Brief description of what this query does"
+                    value={modalForm.description}
+                    onChange={(e) => setModalForm({ ...modalForm, description: e.target.value })}
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  SQL Statement *
+                </label>
+                <textarea
+                  required
+                  rows={6}
+                  value={modalForm.sql_text}
+                  onChange={(e) => setModalForm({ ...modalForm, sql_text: e.target.value })}
+                  placeholder="SELECT * FROM t_pems;"
+                  className="w-full font-mono text-xs bg-slate-50 border border-slate-300 rounded-lg p-3 text-slate-900 focus:outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600 leading-relaxed"
+                />
+              </div>
+
+              <div className="text-[11px] text-slate-500">
+                This query will be stored in <code className="font-mono text-teal-700 bg-teal-50 px-1 py-0.5 rounded">t_sql_queries</code> and maintained across sessions and cloud sync.
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium text-white bg-teal-600 hover:bg-teal-700 rounded-lg transition-colors shadow-xs"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>{modalForm.id ? 'Update Query' : 'Save to t_sql_queries'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
