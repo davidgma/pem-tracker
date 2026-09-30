@@ -27,8 +27,10 @@ import {
   RotateCw,
   FolderOpen,
   Bookmark,
+  Maximize2,
 } from 'lucide-react';
 import { format as formatSql } from 'sql-formatter';
+import { SqlIdeView, IdeInitialState, IdeReturnPayload } from './SqlIdeView';
 
 /**
  * Prettify and format SQL statements with uppercase keywords and standardized indentation
@@ -155,6 +157,7 @@ const SqlSyntaxEditor: React.FC<{
   minHeightClass?: string;
   placeholder?: string;
   showPrettify?: boolean;
+  onOpenIde?: () => void;
 }> = ({
   value,
   onChange,
@@ -163,6 +166,7 @@ const SqlSyntaxEditor: React.FC<{
   minHeightClass = 'min-h-[140px] sm:min-h-[160px]',
   placeholder = 'Enter SQL statement here (e.g. SELECT * FROM t_activities;)',
   showPrettify = true,
+  onOpenIde,
 }) => {
   const preRef = useRef<HTMLPreElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -195,19 +199,36 @@ const SqlSyntaxEditor: React.FC<{
 
   return (
     <div className="relative rounded-xl border border-slate-300 bg-white font-mono text-sm shadow-sm overflow-hidden focus-within:border-teal-600 focus-within:ring-2 focus-within:ring-teal-100 transition-all group">
-      {/* Corner Quick Prettify Action */}
-      {showPrettify && (
-        <button
-          type="button"
-          onClick={handlePrettify}
-          disabled={disabled || !value.trim()}
-          className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/95 hover:bg-slate-100 text-slate-600 hover:text-teal-700 border border-slate-200/90 shadow-xs text-[11px] font-sans font-medium transition-all backdrop-blur-xs disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
-          title="Prettify & Format SQL statement"
-        >
-          <Sparkles className="w-3 h-3 text-teal-600" />
-          <span>Prettify</span>
-        </button>
-      )}
+      {/* Corner Quick Actions */}
+      <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5">
+        {onOpenIde && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenIde();
+            }}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/95 hover:bg-slate-100 text-slate-700 hover:text-teal-700 border border-slate-200/90 shadow-xs text-[11px] font-sans font-medium transition-all backdrop-blur-xs cursor-pointer"
+            title="Open in full-page IDE editing mode"
+          >
+            <Maximize2 className="w-3 h-3 text-teal-600" />
+            <span>Full IDE</span>
+          </button>
+        )}
+        {showPrettify && (
+          <button
+            type="button"
+            onClick={handlePrettify}
+            disabled={disabled || !value.trim()}
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/95 hover:bg-slate-100 text-slate-600 hover:text-teal-700 border border-slate-200/90 shadow-xs text-[11px] font-sans font-medium transition-all backdrop-blur-xs disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+            title="Prettify & Format SQL statement"
+          >
+            <Sparkles className="w-3 h-3 text-teal-600" />
+            <span>Prettify</span>
+          </button>
+        )}
+      </div>
 
       {/* Syntax Highlighted Mirror (Absolute background) */}
       <pre

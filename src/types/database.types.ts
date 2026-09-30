@@ -68,3 +68,18 @@ export interface SqlQueryRecord {
   created_at?: string;
   updated_at?: string;
 }
+
+export interface ColumnSchemaInfo {
+  cid: number;
+  name: string;
+  type: string;
+  notnull: number;
+  dflt_value: any;
+  pk: number;
+}
+
+export interface TableSchemaInfo {
+  name: string;
+  rowCount: number;
+  columns: ColumnSchemaInfo[];
+}

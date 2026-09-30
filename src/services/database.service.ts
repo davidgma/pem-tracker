@@ -7,7 +7,7 @@ import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { get, set } from 'idb-keyval';
 import { AsyncMutex } from './mutex';
-import { ActivityRecord, PEMRecord, QueryExecutionResult, SettingRecord, SqlQueryRecord } from '../types/database.types';
+import { ActivityRecord, PEMRecord, QueryExecutionResult, SettingRecord, SqlQueryRecord, TableSchemaInfo, ColumnSchemaInfo } from '../types/database.types';
 
 const IDB_KEY_SQLITE_DATA = 'pem_sqlite_database_bin';
 const IDB_KEY_UPDATED_AT = 'pem_sqlite_updated_at';
@@ -1196,6 +1196,59 @@ ORDER BY a.activity_day DESC;`,
     this.seedPresetQueries();
     await this.persistToLocalCache();
     this.notifyChange();
+  }
+
+  /**
+   * Introspect database tables and columns with row counts for IDE schema tree
+   */
+  public async getDatabaseSchema(): Promise<TableSchemaInfo[]> {
+    await this.initialize();
+    return this.mutex.runExclusive(async () => {
+      if (!this.db) return [];
+      try {
+        const tablesRes = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
+        if (!tablesRes.length || !tablesRes[0].values.length) return [];
+
+        const result: TableSchemaInfo[] = [];
+        for (const row of tablesRes[0].values) {
+          const tableName = String(row[0]);
+          const colRes = this.db.exec(`PRAGMA table_info("${tableName}");`);
+          const columns: ColumnSchemaInfo[] = [];
+          if (colRes.length && colRes[0].values) {
+            for (const col of colRes[0].values) {
+              columns.push({
+                cid: Number(col[0]),
+                name: String(col[1]),
+                type: String(col[2] || 'TEXT'),
+                notnull: Number(col[3]),
+                dflt_value: col[4],
+                pk: Number(col[5]),
+              });
+            }
+          }
+
+          let rowCount = 0;
+          try {
+            const countRes = this.db.exec(`SELECT COUNT(*) as count FROM "${tableName}";`);
+            if (countRes.length && countRes[0].values.length) {
+              rowCount = Number(countRes[0].values[0][0]) || 0;
+            }
+          } catch {
+            // ignore
+          }
+
+          result.push({
+            name: tableName,
+            rowCount,
+            columns,
+          });
+        }
+        return result;
+      } catch (err) {
+        console.error('Failed to introspect schema:', err);
+        return [];
+      }
+    });
   }
 }
 

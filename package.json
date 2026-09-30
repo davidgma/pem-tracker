@@ -12,6 +12,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/sql.js": "^1.4.11",
     "@vitejs/plugin-react": "^6.1.1",
