@@ -178,7 +178,7 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
     (monaco: Monaco) => {
       // Register custom SQLite schema completion provider
       return monaco.languages.registerCompletionItemProvider('sql', {
-        provideCompletionItems: (model, position) => {
+        provideCompletionItems: (model: any, position: any) => {
           const word = model.getWordUntilPosition(position);
           const range = {
             startLineNumber: position.lineNumber,

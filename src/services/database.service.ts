@@ -1203,7 +1203,7 @@ ORDER BY a.activity_day DESC;`,
    */
   public async getDatabaseSchema(): Promise<TableSchemaInfo[]> {
     await this.initialize();
-    return this.mutex.runExclusive(async () => {
+    return this.mutex.lock(async () => {
       if (!this.db) return [];
       try {
         const tablesRes = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
