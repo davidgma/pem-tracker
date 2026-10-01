@@ -44,11 +44,23 @@ export interface ComputedActivityMetrics {
   exertion_score: number;
 }
 
+export interface SingleQueryResult {
+  statementIndex: number;
+  sql: string;
+  columns: string[];
+  values: any[][];
+  executionTimeMs: number;
+  rowsAffected?: number;
+  error?: string;
+}
+
 export interface QueryExecutionResult {
   columns: string[];
   values: any[][];
   executionTimeMs: number;
   rowsAffected?: number;
+  results: SingleQueryResult[];
+  totalStatements: number;
 }
 
 export type SyncStatus = 'idle' | 'syncing' | 'synced' | 'pending' | 'merging' | 'offline' | 'error' | 'conflict';

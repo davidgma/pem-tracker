@@ -29,6 +29,44 @@ import {
   Info,
 } from 'lucide-react';
 
+/**
+ * Format timestamp into local human-readable date (e.g., "Wed, Oct 1, 2026")
+ */
+function formatHumanDate(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const normalized = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * Format timestamp into local human-readable time (e.g., "02:15 PM")
+ */
+function formatHumanTime(dateStr: string): string {
+  if (!dateStr) return '';
+  try {
+    const normalized = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
 export const PacingTrackerView: React.FC<{ context: PluginContext }> = ({ context }) => {
   const [activities, setActivities] = useState<ActivityRecord[]>([]);
   const [pems, setPems] = useState<PEMRecord[]>([]);
@@ -474,9 +512,9 @@ export const PacingTrackerView: React.FC<{ context: PluginContext }> = ({ contex
                 }`}
               >
                 <div className="flex items-center justify-between font-semibold">
-                  <span className="text-slate-900 flex items-center gap-1.5 font-mono">
+                  <span className="text-slate-900 flex items-center gap-1.5 font-medium text-xs">
                     <Calendar className="w-3.5 h-3.5 text-teal-600" />
-                    {item.date}
+                    {formatHumanDate(item.date)}
                   </span>
                   {item.isCrashObserved ? (
                     <span className="px-2 py-0.5 rounded-full text-[10px] bg-rose-100 text-rose-800 font-bold border border-rose-200">
@@ -517,13 +555,13 @@ export const PacingTrackerView: React.FC<{ context: PluginContext }> = ({ contex
                 {/* Lag Outcome */}
                 <div className="pt-1 text-[11px] space-y-1">
                   <div className="flex justify-between text-slate-600">
-                    <span>Day +1 Fatigue ({item.nextDayStr}):</span>
+                    <span>Day +1 Fatigue ({formatHumanDate(item.nextDayStr)}):</span>
                     <span className="font-mono font-medium text-slate-900">
                       {item.nextDayPem ? `${item.nextDayPem.avgFatigue.toFixed(1)}/10` : 'None'}
                     </span>
                   </div>
                   <div className="flex justify-between text-slate-600">
-                    <span>Day +2 Fatigue ({item.twoDaysStr}):</span>
+                    <span>Day +2 Fatigue ({formatHumanDate(item.twoDaysStr)}):</span>
                     <span className="font-mono font-medium text-slate-900">
                       {item.twoDayPem ? `${item.twoDayPem.avgFatigue.toFixed(1)}/10` : 'None'}
                     </span>
@@ -580,8 +618,13 @@ export const PacingTrackerView: React.FC<{ context: PluginContext }> = ({ contex
 
                     return (
                       <tr key={act.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-2 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
-                          {act.activity_date.substring(5, 16)}
+                        <td className="py-2.5 px-3 text-slate-700 whitespace-nowrap" title={act.activity_date}>
+                          <div className="font-medium text-slate-900 text-xs">
+                            {formatHumanDate(act.activity_date)}
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-normal">
+                            {formatHumanTime(act.activity_date)}
+                          </div>
                         </td>
                         <td className="py-2 px-3 font-medium text-slate-900 whitespace-nowrap">
                           {act.activity_name}
@@ -658,8 +701,13 @@ export const PacingTrackerView: React.FC<{ context: PluginContext }> = ({ contex
                 ) : (
                   pems.map((pem) => (
                     <tr key={pem.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-2 px-3 text-slate-600 font-mono text-[11px] whitespace-nowrap">
-                        {pem.pem_date.substring(5, 16)}
+                      <td className="py-2.5 px-3 text-slate-700 whitespace-nowrap" title={pem.pem_date}>
+                        <div className="font-medium text-slate-900 text-xs">
+                          {formatHumanDate(pem.pem_date)}
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-normal">
+                          {formatHumanTime(pem.pem_date)}
+                        </div>
                       </td>
                       <td className="py-2 px-3 text-center whitespace-nowrap">
                         <span

@@ -41,6 +41,7 @@ import {
 import { PluginContext } from '../plugin.types';
 import {
   QueryExecutionResult,
+  SingleQueryResult,
   SqlQueryRecord,
   TableSchemaInfo,
 } from '../../types/database.types';
@@ -128,6 +129,7 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
   const [result, setResult] = useState<QueryExecutionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeBottomTab, setActiveBottomTab] = useState<'results' | 'help'>('results');
+  const [selectedResultIndex, setSelectedResultIndex] = useState<number>(-1);
   const [isBottomPanelOpen, setIsBottomPanelOpen] = useState<boolean>(true);
   const [copiedResults, setCopiedResults] = useState<boolean>(false);
 
@@ -400,6 +402,7 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
     setIsRunning(true);
     setError(null);
     setActiveBottomTab('results');
+    setSelectedResultIndex(-1);
     setIsBottomPanelOpen(true);
 
     try {
@@ -544,12 +547,18 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
     }
   };
 
-  // Copy Query Results as JSON
-  const handleCopyResultsJson = () => {
-    if (!result) return;
-    const rows = result.values.map((row) => {
+  // Copy Query Results as JSON (all, selected, or specific statement)
+  const handleCopyResultsJson = (specificStmt?: SingleQueryResult) => {
+    const target =
+      specificStmt ||
+      (selectedResultIndex >= 0 && result?.results?.[selectedResultIndex]
+        ? result.results[selectedResultIndex]
+        : result);
+    if (!target) return;
+
+    const rows = target.values.map((row) => {
       const obj: Record<string, any> = {};
-      result.columns.forEach((col, idx) => {
+      target.columns.forEach((col, idx) => {
         obj[col] = row[idx];
       });
       return obj;
@@ -559,11 +568,17 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
     setTimeout(() => setCopiedResults(false), 2000);
   };
 
-  // Download Query Results as CSV
-  const handleDownloadCsv = () => {
-    if (!result || result.values.length === 0) return;
-    const header = result.columns.map((c) => `"${c.replace(/"/g, '""')}"`).join(',');
-    const rows = result.values.map((row) =>
+  // Download Query Results as CSV (all, selected, or specific statement)
+  const handleDownloadCsv = (specificStmt?: SingleQueryResult) => {
+    const target =
+      specificStmt ||
+      (selectedResultIndex >= 0 && result?.results?.[selectedResultIndex]
+        ? result.results[selectedResultIndex]
+        : result);
+    if (!target || target.values.length === 0) return;
+
+    const header = target.columns.map((c) => `"${c.replace(/"/g, '""')}"`).join(',');
+    const rows = target.values.map((row) =>
       row
         .map((val) => {
           if (val === null || val === undefined) return '""';
@@ -577,7 +592,10 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `${queryName || 'query_results'}_${Date.now()}.csv`);
+    const prefix = specificStmt
+      ? `query_${specificStmt.statementIndex}`
+      : queryName || 'query_results';
+    link.setAttribute('download', `${prefix}_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1173,7 +1191,7 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
                     <>
                       <button
                         type="button"
-                        onClick={handleCopyResultsJson}
+                        onClick={() => handleCopyResultsJson()}
                         className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                           theme === 'vs-dark'
                             ? 'hover:bg-[#333] text-slate-300'
@@ -1191,7 +1209,7 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={handleDownloadCsv}
+                        onClick={() => handleDownloadCsv()}
                         className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
                           theme === 'vs-dark'
                             ? 'hover:bg-[#333] text-slate-300'
@@ -1220,9 +1238,9 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
 
               {/* Tab 1: Execution Results */}
               {activeBottomTab === 'results' && (
-                <div className="flex-1 overflow-auto p-2">
+                <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
                   {error ? (
-                    <div className="p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs space-y-1">
+                    <div className="p-4 m-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs space-y-1">
                       <div className="flex items-center gap-1.5 font-bold">
                         <AlertCircle className="w-4 h-4 shrink-0" />
                         <span>SQLite Execution Error</span>
@@ -1237,72 +1255,337 @@ export const SqlIdeView: React.FC<SqlIdeViewProps> = ({
                         Press <strong>Ctrl + Enter</strong> or click <strong>Run</strong> above to execute SQL statements.
                       </p>
                     </div>
-                  ) : result.columns.length === 0 ? (
-                    <div className="p-4 text-xs text-slate-400 space-y-1">
-                      <p className="text-emerald-400 font-semibold">Statement executed successfully.</p>
-                      <p className="font-mono text-[11px]">
-                        Rows affected: {result.rowsAffected ?? 0} · Execution time:{' '}
-                        {result.executionTimeMs.toFixed(1)} ms
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="h-full flex flex-col">
-                      <div className="text-[11px] text-slate-400 mb-1 flex items-center justify-between px-1">
-                        <span>
-                          Returned <strong>{result.values.length}</strong> rows in{' '}
-                          <strong>{result.executionTimeMs.toFixed(1)} ms</strong>
-                        </span>
-                        <span className="font-mono">{result.columns.length} columns</span>
-                      </div>
+                  ) : (() => {
+                    const statementList =
+                      result.results && result.results.length > 0
+                        ? result.results
+                        : [
+                            {
+                              statementIndex: 1,
+                              sql: sqlCode,
+                              columns: result.columns,
+                              values: result.values,
+                              executionTimeMs: result.executionTimeMs,
+                              rowsAffected: result.rowsAffected,
+                            },
+                          ];
 
-                      <div className="flex-1 overflow-auto border rounded border-inherit">
-                        <table className="w-full text-left border-collapse text-xs">
-                          <thead
-                            className={`sticky top-0 z-10 font-mono text-[11px] ${
-                              theme === 'vs-dark' ? 'bg-[#2d2d2d]' : 'bg-slate-100'
+                    return (
+                      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                        {/* Sub-tab Query Selector if multiple statements exist */}
+                        {statementList.length > 1 && (
+                          <div
+                            className={`flex items-center gap-1.5 px-3 py-1.5 border-b text-xs overflow-x-auto shrink-0 ${
+                              theme === 'vs-dark'
+                                ? 'bg-[#181818] border-[#333]'
+                                : 'bg-slate-50 border-slate-200'
                             }`}
                           >
-                            <tr>
-                              <th className="p-2 border-b border-inherit w-10 text-slate-400 font-normal">
-                                #
-                              </th>
-                              {result.columns.map((col) => (
-                                <th
-                                  key={col}
-                                  className="p-2 border-b border-inherit font-semibold text-slate-300"
-                                >
-                                  {col}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-inherit font-mono">
-                            {result.values.map((row, rIdx) => (
-                              <tr
-                                key={rIdx}
-                                className={
-                                  theme === 'vs-dark'
-                                    ? 'hover:bg-[#2a2a2a]'
-                                    : 'hover:bg-slate-50'
-                                }
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 shrink-0 mr-1 flex items-center gap-1">
+                              <Layers className="w-3 h-3 text-teal-500" />
+                              <span>Outputs:</span>
+                            </span>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedResultIndex(-1)}
+                              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors shrink-0 ${
+                                selectedResultIndex === -1
+                                  ? theme === 'vs-dark'
+                                    ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 font-semibold'
+                                    : 'bg-white text-teal-800 border border-teal-300 shadow-2xs font-semibold'
+                                  : theme === 'vs-dark'
+                                  ? 'text-slate-400 hover:text-slate-200'
+                                  : 'text-slate-600 hover:text-slate-900'
+                              }`}
+                            >
+                              All Queries ({statementList.length})
+                            </button>
+
+                            {statementList.map((stmt, sIdx) => (
+                              <button
+                                key={sIdx}
+                                type="button"
+                                onClick={() => setSelectedResultIndex(sIdx)}
+                                className={`px-2.5 py-1 rounded text-xs font-mono transition-colors flex items-center gap-1.5 shrink-0 ${
+                                  selectedResultIndex === sIdx
+                                    ? theme === 'vs-dark'
+                                      ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 font-semibold'
+                                      : 'bg-white text-teal-800 border border-teal-300 shadow-2xs font-semibold'
+                                    : theme === 'vs-dark'
+                                    ? 'text-slate-400 hover:text-slate-200'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
                               >
-                                <td className="p-2 text-slate-500 text-[10px]">{rIdx + 1}</td>
-                                {row.map((cell, cIdx) => (
-                                  <td key={cIdx} className="p-2 whitespace-nowrap max-w-xs truncate">
-                                    {cell === null ? (
-                                      <span className="text-slate-500 italic">NULL</span>
-                                    ) : (
-                                      String(cell)
-                                    )}
-                                  </td>
-                                ))}
-                              </tr>
+                                <span>Query #{stmt.statementIndex}</span>
+                                {stmt.error ? (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                                ) : (
+                                  <span className="text-[10px] opacity-75">
+                                    ({stmt.values?.length || 0}r)
+                                  </span>
+                                )}
+                              </button>
                             ))}
-                          </tbody>
-                        </table>
+                          </div>
+                        )}
+
+                        {/* Results Body: Stacked view vs Selected single query view */}
+                        <div className="flex-1 overflow-auto p-2">
+                          {selectedResultIndex >= 0 && statementList[selectedResultIndex] ? (
+                            /* Single Selected Statement in Full Height */
+                            <div className="h-full flex flex-col">
+                              <div className="text-[11px] text-slate-400 mb-1 flex items-center justify-between px-1">
+                                <span className="font-mono text-xs font-medium text-teal-400 truncate max-w-md">
+                                  Query #{statementList[selectedResultIndex].statementIndex}: {statementList[selectedResultIndex].sql}
+                                </span>
+                                <span>
+                                  Returned <strong>{statementList[selectedResultIndex].values?.length || 0}</strong> rows in{' '}
+                                  <strong>{statementList[selectedResultIndex].executionTimeMs.toFixed(1)} ms</strong>
+                                </span>
+                              </div>
+                              <div className="flex-1 overflow-auto border rounded border-inherit">
+                                <table className="w-full text-left border-collapse text-xs">
+                                  <thead
+                                    className={`sticky top-0 z-10 font-mono text-[11px] ${
+                                      theme === 'vs-dark' ? 'bg-[#2d2d2d]' : 'bg-slate-100'
+                                    }`}
+                                  >
+                                    <tr>
+                                      <th className="p-2 border-b border-inherit w-10 text-slate-400 font-normal">
+                                        #
+                                      </th>
+                                      {statementList[selectedResultIndex].columns.map((col) => (
+                                        <th
+                                          key={col}
+                                          className={`p-2 border-b border-inherit font-semibold ${
+                                            theme === 'vs-dark' ? 'text-slate-300' : 'text-slate-800'
+                                          }`}
+                                        >
+                                          {col}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-inherit font-mono">
+                                    {statementList[selectedResultIndex].values.length === 0 ? (
+                                      <tr>
+                                        <td
+                                          colSpan={statementList[selectedResultIndex].columns.length + 1}
+                                          className="p-6 text-center text-slate-500 italic text-xs"
+                                        >
+                                          Query executed successfully. 0 rows returned.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      statementList[selectedResultIndex].values.map((row, rIdx) => (
+                                        <tr
+                                          key={rIdx}
+                                          className={
+                                            theme === 'vs-dark'
+                                              ? 'hover:bg-[#2a2a2a]'
+                                              : 'hover:bg-slate-50'
+                                          }
+                                        >
+                                          <td className="p-2 text-slate-500 text-[10px]">{rIdx + 1}</td>
+                                          {row.map((cell, cIdx) => (
+                                            <td key={cIdx} className="p-2 whitespace-nowrap max-w-xs truncate">
+                                              {cell === null ? (
+                                                <span className="text-slate-500 italic">NULL</span>
+                                              ) : (
+                                                String(cell)
+                                              )}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Stacked View: Output for Each SQL Query */
+                            <div className="space-y-3">
+                              {statementList.map((stmt, idx) => (
+                                <div
+                                  key={stmt.statementIndex || idx}
+                                  className={`rounded-lg border overflow-hidden ${
+                                    theme === 'vs-dark'
+                                      ? 'bg-[#252526] border-[#333]'
+                                      : 'bg-white border-slate-200'
+                                  }`}
+                                >
+                                  {/* Statement Header */}
+                                  <div
+                                    className={`flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 border-b text-xs ${
+                                      theme === 'vs-dark'
+                                        ? 'bg-[#1e1e1e] border-[#333]'
+                                        : 'bg-slate-50 border-slate-200'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="font-mono font-bold text-[11px] px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-400">
+                                        Query #{stmt.statementIndex}
+                                      </span>
+                                      <span
+                                        className={`font-mono text-[11px] truncate max-w-xs sm:max-w-md md:max-w-xl ${
+                                          theme === 'vs-dark' ? 'text-slate-300' : 'text-slate-700'
+                                        }`}
+                                        title={stmt.sql}
+                                      >
+                                        {stmt.sql}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 font-mono text-[11px] shrink-0">
+                                      {stmt.error ? (
+                                        <span className="px-2 py-0.5 rounded bg-rose-500/20 text-rose-400 font-medium">
+                                          Error
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <span className="text-slate-400">
+                                            {stmt.values?.length || 0} rows
+                                          </span>
+                                          {(stmt.rowsAffected ?? 0) > 0 && (
+                                            <span className="text-teal-400 font-medium">
+                                              · {stmt.rowsAffected} affected
+                                            </span>
+                                          )}
+                                          <span className="text-slate-500">
+                                            · {stmt.executionTimeMs.toFixed(1)} ms
+                                          </span>
+
+                                          {stmt.columns.length > 0 && (
+                                            <div className="flex items-center gap-1 ml-1.5 font-sans">
+                                              <button
+                                                type="button"
+                                                onClick={() => handleCopyResultsJson(stmt)}
+                                                className={`p-1 rounded transition-colors ${
+                                                  theme === 'vs-dark'
+                                                    ? 'hover:bg-[#333] text-slate-300'
+                                                    : 'hover:bg-slate-200 text-slate-700'
+                                                }`}
+                                                title="Copy this query's results as JSON"
+                                              >
+                                                <Copy className="w-3 h-3" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDownloadCsv(stmt)}
+                                                className={`p-1 rounded transition-colors ${
+                                                  theme === 'vs-dark'
+                                                    ? 'hover:bg-[#333] text-slate-300'
+                                                    : 'hover:bg-slate-200 text-slate-700'
+                                                }`}
+                                                title="Download this query's results as CSV"
+                                              >
+                                                <Download className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Statement Content */}
+                                  {stmt.error ? (
+                                    <div className="p-3 bg-rose-500/10 text-xs text-rose-400 space-y-0.5">
+                                      <div className="font-semibold flex items-center gap-1.5">
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                        <span>SQLite Execution Error</span>
+                                      </div>
+                                      <p className="font-mono">{stmt.error}</p>
+                                    </div>
+                                  ) : stmt.columns.length > 0 ? (
+                                    <div className="overflow-x-auto max-h-56">
+                                      <table className="w-full text-left border-collapse text-xs">
+                                        <thead
+                                          className={`sticky top-0 z-10 font-mono text-[11px] ${
+                                            theme === 'vs-dark' ? 'bg-[#2d2d2d]' : 'bg-slate-100'
+                                          }`}
+                                        >
+                                          <tr>
+                                            <th className="p-2 border-b border-inherit w-10 text-slate-400 font-normal">
+                                              #
+                                            </th>
+                                            {stmt.columns.map((col) => (
+                                              <th
+                                                key={col}
+                                                className={`p-2 border-b border-inherit font-semibold ${
+                                                  theme === 'vs-dark'
+                                                    ? 'text-slate-300'
+                                                    : 'text-slate-800'
+                                                }`}
+                                              >
+                                                {col}
+                                              </th>
+                                            ))}
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-inherit font-mono">
+                                          {stmt.values.length === 0 ? (
+                                            <tr>
+                                              <td
+                                                colSpan={stmt.columns.length + 1}
+                                                className="p-4 text-center text-slate-500 italic text-xs"
+                                              >
+                                                Query executed successfully. 0 rows returned.
+                                              </td>
+                                            </tr>
+                                          ) : (
+                                            stmt.values.map((row, rIdx) => (
+                                              <tr
+                                                key={rIdx}
+                                                className={
+                                                  theme === 'vs-dark'
+                                                    ? 'hover:bg-[#2a2a2a]'
+                                                    : 'hover:bg-slate-50'
+                                                }
+                                              >
+                                                <td className="p-2 text-slate-500 text-[10px]">
+                                                  {rIdx + 1}
+                                                </td>
+                                                {row.map((cell, cIdx) => (
+                                                  <td
+                                                    key={cIdx}
+                                                    className="p-2 whitespace-nowrap max-w-xs truncate"
+                                                  >
+                                                    {cell === null ? (
+                                                      <span className="text-slate-500 italic">
+                                                        NULL
+                                                      </span>
+                                                    ) : (
+                                                      String(cell)
+                                                    )}
+                                                  </td>
+                                                ))}
+                                              </tr>
+                                            ))
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <div className="p-3 text-center text-slate-500 text-xs font-mono">
+                                      Statement executed successfully with no result set.
+                                      {(stmt.rowsAffected ?? 0) > 0 && (
+                                        <span className="text-teal-400 font-semibold ml-1">
+                                          ({stmt.rowsAffected} rows affected)
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               )}
 

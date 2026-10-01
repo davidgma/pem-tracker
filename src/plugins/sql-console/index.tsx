@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Plugin, PluginContext } from '../plugin.types';
-import { QueryExecutionResult, SqlQueryRecord } from '../../types/database.types';
+import { QueryExecutionResult, SingleQueryResult, SqlQueryRecord } from '../../types/database.types';
 import {
   Database,
   Play,
@@ -28,6 +28,7 @@ import {
   FolderOpen,
   Bookmark,
   Maximize2,
+  Layers,
 } from 'lucide-react';
 import { format as formatSql } from 'sql-formatter';
 import { SqlIdeView, IdeInitialState, IdeReturnPayload } from './SqlIdeView';
@@ -253,6 +254,210 @@ const SqlSyntaxEditor: React.FC<{
         spellCheck={false}
         className={`relative block w-full p-3.5 bg-transparent text-transparent caret-slate-900 resize-y whitespace-pre-wrap break-words leading-relaxed font-mono text-sm outline-none overflow-auto z-10 selection:bg-teal-100 selection:text-transparent ${minHeightClass}`}
       />
+    </div>
+  );
+};
+
+interface QueryResultCardProps {
+  statement: SingleQueryResult;
+  isOnlyStatement?: boolean;
+}
+
+const QueryResultCard: React.FC<QueryResultCardProps> = ({ statement, isOnlyStatement }) => {
+  const [copied, setCopied] = useState<boolean>(false);
+
+  const handleCopyJson = () => {
+    if (!statement || statement.columns.length === 0) return;
+    const jsonObjects = statement.values.map((row) => {
+      const obj: Record<string, any> = {};
+      statement.columns.forEach((col, idx) => {
+        obj[col] = row[idx];
+      });
+      return obj;
+    });
+    navigator.clipboard.writeText(JSON.stringify(jsonObjects, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleExportCsv = () => {
+    if (!statement || statement.columns.length === 0) return;
+    const headers = statement.columns.join(',');
+    const rows = statement.values
+      .map((row) =>
+        row
+          .map((val) => {
+            if (val === null || val === undefined) return '';
+            const str = String(val);
+            if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+              return `"${str.replace(/"/g, '""')}"`;
+            }
+            return str;
+          })
+          .join(',')
+      )
+      .join('\n');
+    const csvContent = `${headers}\n${rows}`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `query_${statement.statementIndex}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm space-y-0">
+      {/* Query Stats Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-slate-50 border-b border-slate-200 text-xs">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0 font-bold px-2 py-0.5 rounded bg-teal-100 text-teal-800 text-[11px] font-mono border border-teal-200">
+            Query #{statement.statementIndex}
+          </span>
+          <span
+            className="font-mono text-[11px] text-slate-700 truncate max-w-xs sm:max-w-md md:max-w-xl"
+            title={statement.sql}
+          >
+            {statement.sql}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3 text-slate-600 font-mono text-[11px] shrink-0">
+          {statement.error ? (
+            <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-medium border border-rose-200">
+              Error
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center gap-1.5 text-slate-700">
+                <TableIcon className="w-3.5 h-3.5 text-teal-600" />
+                <span>
+                  <strong>{statement.values?.length || 0}</strong>{' '}
+                  {statement.values?.length === 1 ? 'row' : 'rows'} returned
+                </span>
+                {(statement.rowsAffected ?? 0) > 0 && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <span className="text-teal-700 font-medium">
+                      {statement.rowsAffected} affected
+                    </span>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1 text-slate-400">
+                <Clock className="w-3.5 h-3.5" />
+                <span>{statement.executionTimeMs.toFixed(2)} ms</span>
+              </div>
+
+              {statement.columns.length > 0 && (
+                <div className="flex items-center gap-1.5 ml-2 font-sans">
+                  <button
+                    type="button"
+                    onClick={handleCopyJson}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+                    title="Copy this query's result set as JSON"
+                  >
+                    {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                    <span>{copied ? 'Copied' : 'JSON'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+                    title="Export this query's result set as CSV"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>CSV</span>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Query Content */}
+      {statement.error ? (
+        <div className="p-4 bg-rose-50 text-xs text-rose-800 flex items-start gap-2.5">
+          <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-semibold text-rose-900">
+              SQLite Execution Error on Query #{statement.statementIndex}
+            </p>
+            <p className="font-mono text-rose-700 break-all">{statement.error}</p>
+          </div>
+        </div>
+      ) : statement.columns.length > 0 ? (
+        <div className="overflow-x-auto max-h-[450px] overflow-y-auto">
+          <table className="w-full text-left text-xs border-collapse font-sans">
+            <thead className="sticky top-0 bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 z-10">
+              <tr>
+                <th className="py-2 px-3 text-[11px] font-mono text-slate-500 w-12 text-center border-r border-slate-200">
+                  #
+                </th>
+                {statement.columns.map((col, idx) => (
+                  <th
+                    key={idx}
+                    className="py-2 px-3.5 font-mono text-slate-800 tracking-wider whitespace-nowrap border-r border-slate-200 last:border-r-0"
+                  >
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-800">
+              {statement.values.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={statement.columns.length + 1}
+                    className="py-8 text-center text-slate-400 italic text-xs"
+                  >
+                    Query executed successfully. 0 rows returned.
+                  </td>
+                </tr>
+              ) : (
+                statement.values.map((row, rIdx) => (
+                  <tr
+                    key={rIdx}
+                    className="hover:bg-slate-50/80 transition-colors font-mono"
+                  >
+                    <td className="py-2 px-3 text-[11px] text-slate-400 text-center border-r border-slate-100">
+                      {rIdx + 1}
+                    </td>
+                    {row.map((val, cIdx) => (
+                      <td
+                        key={cIdx}
+                        className="py-2 px-3.5 whitespace-nowrap border-r border-slate-100 last:border-r-0 text-slate-800"
+                      >
+                        {val === null || val === undefined ? (
+                          <span className="text-slate-400 italic font-mono text-[11px]">NULL</span>
+                        ) : typeof val === 'number' ? (
+                          <span className="tabular-nums text-indigo-700 font-medium">{val}</span>
+                        ) : (
+                          String(val)
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-6 text-center text-slate-500 text-xs font-mono">
+          Statement executed successfully with no result set.
+          {(statement.rowsAffected ?? 0) > 0 && (
+            <span className="text-teal-700 font-semibold ml-1">
+              ({statement.rowsAffected} {statement.rowsAffected === 1 ? 'row' : 'rows'} affected)
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -890,93 +1095,45 @@ const SQLConsoleView: React.FC<{ context: PluginContext }> = ({ context }) => {
 
       {/* Results Section */}
       {result && (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm space-y-0">
-          {/* Query Stats Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200 text-xs">
-            <div className="flex items-center gap-2 text-slate-700">
-              <TableIcon className="w-4 h-4 text-teal-600" />
-              <span>
-                <strong>{result.values.length}</strong> {result.values.length === 1 ? 'row' : 'rows'} returned
-              </span>
-              {(result.rowsAffected ?? 0) > 0 && (
-                <>
-                  <span className="text-slate-300">·</span>
-                  <span className="text-teal-700 font-medium">
-                    {result.rowsAffected} {result.rowsAffected === 1 ? 'row' : 'rows'} affected
-                  </span>
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5 text-slate-500 font-mono">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
-              <span>{result.executionTimeMs.toFixed(2)} ms</span>
-            </div>
-          </div>
-
-          {/* Results Table */}
-          {result.columns.length > 0 ? (
-            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-              <table className="w-full text-left text-xs border-collapse font-sans">
-                <thead className="sticky top-0 bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 z-10">
-                  <tr>
-                    <th className="py-2.5 px-3 text-[11px] font-mono text-slate-500 w-12 text-center border-r border-slate-200">
-                      #
-                    </th>
-                    {result.columns.map((col, idx) => (
-                      <th
-                        key={idx}
-                        className="py-2.5 px-3.5 font-mono text-slate-800 tracking-wider whitespace-nowrap border-r border-slate-200 last:border-r-0"
-                      >
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-800">
-                  {result.values.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={result.columns.length + 1}
-                        className="py-8 text-center text-slate-400 italic text-xs"
-                      >
-                        Query executed successfully. 0 rows returned.
-                      </td>
-                    </tr>
-                  ) : (
-                    result.values.map((row, rIdx) => (
-                      <tr
-                        key={rIdx}
-                        className="hover:bg-slate-50/80 transition-colors font-mono"
-                      >
-                        <td className="py-2 px-3 text-[11px] text-slate-400 text-center border-r border-slate-100">
-                          {rIdx + 1}
-                        </td>
-                        {row.map((val, cIdx) => (
-                          <td
-                            key={cIdx}
-                            className="py-2 px-3.5 whitespace-nowrap border-r border-slate-100 last:border-r-0 text-slate-800"
-                          >
-                            {val === null || val === undefined ? (
-                              <span className="text-slate-400 italic font-mono text-[11px]">NULL</span>
-                            ) : typeof val === 'number' ? (
-                              <span className="tabular-nums text-indigo-700 font-medium">{val}</span>
-                            ) : (
-                              String(val)
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="p-8 text-center text-slate-500 text-xs">
-              Statement executed successfully with no result set.
+        <div className="space-y-4">
+          {/* If multiple queries were executed, show multi-query summary header */}
+          {result.results && result.results.length > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-teal-50 to-indigo-50 border border-teal-200/80 rounded-xl text-xs text-slate-800 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-teal-700" />
+                <span className="font-semibold text-sm text-slate-900">
+                  Multiple SQL Queries Executed
+                </span>
+                <span className="px-2 py-0.5 rounded-full font-mono text-[11px] bg-white text-teal-800 border border-teal-200 font-medium">
+                  {result.results.length} statements
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-slate-600 font-mono text-xs">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Total execution time: {result.executionTimeMs.toFixed(2)} ms</span>
+                </div>
+              </div>
             </div>
           )}
+
+          {/* List of Output Results for each SQL statement */}
+          {(result.results && result.results.length > 0 ? result.results : [
+            {
+              statementIndex: 1,
+              sql,
+              columns: result.columns,
+              values: result.values,
+              executionTimeMs: result.executionTimeMs,
+              rowsAffected: result.rowsAffected,
+            }
+          ]).map((stmt, sIdx) => (
+            <QueryResultCard
+              key={stmt.statementIndex || sIdx}
+              statement={stmt}
+              isOnlyStatement={!result.results || result.results.length <= 1}
+            />
+          ))}
         </div>
       )}
 

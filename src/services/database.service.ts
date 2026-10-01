@@ -7,7 +7,8 @@ import initSqlJs, { Database, SqlJsStatic } from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { get, set } from 'idb-keyval';
 import { AsyncMutex } from './mutex';
-import { ActivityRecord, PEMRecord, QueryExecutionResult, SettingRecord, SqlQueryRecord, TableSchemaInfo, ColumnSchemaInfo } from '../types/database.types';
+import { ActivityRecord, PEMRecord, QueryExecutionResult, SingleQueryResult, SettingRecord, SqlQueryRecord, TableSchemaInfo, ColumnSchemaInfo } from '../types/database.types';
+import { splitSqlStatements } from '../utils/sql-splitter';
 
 const IDB_KEY_SQLITE_DATA = 'pem_sqlite_database_bin';
 const IDB_KEY_UPDATED_AT = 'pem_sqlite_updated_at';
@@ -374,42 +375,112 @@ export class DatabaseService {
   }
 
   /**
-   * Run raw SQL command with detailed timing and tabular results
+   * Run raw SQL command(s) with detailed timing and individual tabular results for each statement
    */
   public async executeRawWithStats(sql: string): Promise<QueryExecutionResult> {
     await this.initialize();
     return this.mutex.lock(async () => {
       if (!this.db) throw new Error('Database not initialized');
 
-      const startTime = performance.now();
-      const results = this.db.exec(sql);
-      const duration = Math.round((performance.now() - startTime) * 100) / 100;
+      const statements = splitSqlStatements(sql);
+      if (statements.length === 0) {
+        return {
+          columns: [],
+          values: [],
+          executionTimeMs: 0,
+          rowsAffected: 0,
+          results: [],
+          totalStatements: 0,
+        };
+      }
 
-      const isMutation = /^(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)/i.test(sql.trim());
-      let rowsAffected: number | undefined;
+      const totalStartTime = performance.now();
+      const results: SingleQueryResult[] = [];
+      let totalRowsAffected = 0;
+      let hasMutation = false;
+      let firstError: Error | null = null;
 
-      if (isMutation) {
-        rowsAffected = this.db.getRowsModified();
+      for (let i = 0; i < statements.length; i++) {
+        const stmt = statements[i];
+        const stmtStart = performance.now();
+
+        try {
+          const execRes = this.db.exec(stmt);
+          const stmtDuration = Math.round((performance.now() - stmtStart) * 100) / 100;
+          const isMutation = /^\s*(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|REPLACE)/i.test(stmt);
+          let rowsAffected: number | undefined;
+
+          if (isMutation) {
+            rowsAffected = this.db.getRowsModified();
+            totalRowsAffected += rowsAffected;
+            hasMutation = true;
+          }
+
+          if (execRes.length > 0) {
+            for (const r of execRes) {
+              results.push({
+                statementIndex: results.length + 1,
+                sql: stmt,
+                columns: r.columns,
+                values: r.values,
+                executionTimeMs: stmtDuration,
+                rowsAffected,
+              });
+            }
+          } else {
+            results.push({
+              statementIndex: results.length + 1,
+              sql: stmt,
+              columns: [],
+              values: [],
+              executionTimeMs: stmtDuration,
+              rowsAffected,
+            });
+          }
+        } catch (err: any) {
+          const stmtDuration = Math.round((performance.now() - stmtStart) * 100) / 100;
+          results.push({
+            statementIndex: results.length + 1,
+            sql: stmt,
+            columns: [],
+            values: [],
+            executionTimeMs: stmtDuration,
+            error: err?.message || String(err),
+          });
+          firstError = err;
+          // Halt execution of subsequent statements on error
+          break;
+        }
+      }
+
+      if (hasMutation) {
         this.isLocalDirty = true;
         await this.persistToLocalCache();
         this.notifyChange();
       }
 
-      if (results.length === 0) {
-        return {
-          columns: [],
-          values: [],
-          executionTimeMs: duration,
-          rowsAffected,
-        };
+      const totalDuration = Math.round((performance.now() - totalStartTime) * 100) / 100;
+
+      // If the execution errored on the only query and has no outputs, rethrow
+      if (firstError && results.length === 1 && results[0].error) {
+        throw firstError;
       }
 
-      const first = results[0];
+      const primary = results.find((r) => r.columns.length > 0) || results[0] || {
+        statementIndex: 1,
+        sql,
+        columns: [],
+        values: [],
+        executionTimeMs: totalDuration,
+      };
+
       return {
-        columns: first.columns,
-        values: first.values,
-        executionTimeMs: duration,
-        rowsAffected,
+        columns: primary.columns,
+        values: primary.values,
+        executionTimeMs: totalDuration,
+        rowsAffected: totalRowsAffected,
+        results,
+        totalStatements: statements.length,
       };
     });
   }
